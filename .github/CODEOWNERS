@@ -1,0 +1,10 @@
+# Path → owner. The last match wins. Login = GitHub login = `git config team.member`.
+# The hooks (scripts/team.py) understand only the "*", "/dir/" and "/file" forms.
+*                @glhfsox
+/ai/             @glhfsox
+/data/           @glhfsox @spdsslg
+/backend/        @SviatoslavShpylovyi
+/frontend/       @oshuptar
+/presentation/   @oshuptar
+/contracts/      @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar
+/STATE.md        @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar

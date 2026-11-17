@@ -1,0 +1,22 @@
+# personal
+HANDOFF.md
+.claude/settings.local.json
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# environments and junk
+.venv/
+__pycache__/
+node_modules/
+.DS_Store
+
+# data and weights (GitHub rejects files > 100 MB)
+/data/raw/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
