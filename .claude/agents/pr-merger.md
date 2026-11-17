@@ -20,9 +20,9 @@ Input: PR number `N` and head SHA `SHA` (the commit the gate ran on).
 ## Merge rules
 - `gate` concluded SUCCESS on `SHA`.
 - `mergeable` is `MERGEABLE`. `CONFLICTING` → ask the author to rebase on `main`.
-- Zones: for each changed file, look up its owners in CODEOWNERS. If the author is not among them, an owner of that zone (other than the author) must have an APPROVED review on this PR. `contracts/` and `STATE.md` belong to everyone, so this rule doesn't apply to them; the next two rules do.
+- Zones: for each changed file (for a renamed file, both the old and the new path: see `rename from` in the diff), look up its owners in CODEOWNERS. If the author is not among them, an owner of that zone (other than the author) must have an APPROVED review on this PR. This covers contracts too: `contracts/<zone>/` belongs to the provider, so a consumer's change there waits for the provider. Paths owned by everyone (`STATE.md`, files directly in `contracts/`) are exempt; the next two rules cover them.
 - STATE.md: the author changed only their own section (`## <login> — ...`).
-- Contracts: if `contracts/` changed, classify the change. Additive (new optional field, new endpoint, new file) is fine. Breaking (removed or renamed field or endpoint, changed type or meaning, new required field) needs an APPROVED review from at least one other teammate.
+- Contracts: if a file under `contracts/` changed, classify the change. Additive (new optional field, new endpoint, new file) is fine. Breaking (removed or renamed field or endpoint, changed type or meaning, new required field) needs an APPROVED review from a consumer: a teammate other than the author who doesn't own that contract. For files directly in `contracts/` (owned by everyone), any teammate other than the author.
 - Not in the diff: secrets, `.env` files (`.env.example` is fine), model weights, large data files, `HANDOFF.md`.
 - Don't judge code quality or style inside a zone; that's the owner's responsibility. Block only on these rules.
 

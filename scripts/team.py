@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 COMMIT = re.compile(r"\bgit\b[^|;&]*\bcommit\b")
 SET_MEMBER = re.compile(r"team\.member[ \t]+[^\s|;&)]|unset\S*\s+team\.member")  # writes, not `git config team.member`
+GH_PR_CREATE = re.compile(r"(?:^|[;&|(\n])\s*gh\s+pr\s+create\b")
+HOW_TO_BODY = ("Fill .github/pull_request_template.md and pass it with --body or --body-file "
+               "(not a $(...) substitution: the hook can't see its output).")
 REMINDER = (
     "Commit done. If this was a meaningful step, update HANDOFF.md (what/why/next, delete stale lines). "
     "If it changed how your zone touches others (contract, API, data format, service), "
@@ -103,6 +107,51 @@ def pr_report(base, author):
     return errors + run_checks(files), warnings
 
 
+def gh_pr_create_args(cmd):
+    """gh's own arguments of a real `gh pr create` call in a shell command; None if the command doesn't make one."""
+    if not GH_PR_CREATE.search(cmd):
+        return None
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split, lex.commenters = True, ""
+        tokens, is_op = list(lex), lambda t: set(t) <= set("();<>|&")
+    except ValueError:  # e.g. an unbalanced quote: rough split
+        tokens, is_op = cmd.split(), lambda t: t[:1] in "();<>|&"
+    for i in range(len(tokens) - 2):
+        if tokens[i:i + 3] == ["gh", "pr", "create"]:
+            args = []
+            for t in tokens[i + 3:]:
+                if is_op(t):  # the next shell operator (&&, ;, |, <<, ...) ends gh's arguments
+                    break
+                args.append(t)
+            return args
+    return None
+
+
+def pr_body_problem(cmd, args, cwd):
+    """gh ignores the PR template in non-interactive mode, so `gh pr create` must carry the filled-in template."""
+    if any(a in ("-w", "--web") for a in args):
+        return None  # the browser form shows the template
+    if any(a in ("-f", "--fill", "--fill-first", "--fill-verbose") for a in args):
+        return "--fill skips the PR template. " + HOW_TO_BODY
+    text = cmd  # covers --body "..." and heredocs
+    files = [v for f, v in zip(args, args[1:]) if f in ("-F", "--body-file")]
+    files += [a.split("=", 1)[1] for a in args if a.startswith("--body-file=")]
+    for name in files:
+        if name == "-":
+            continue
+        p = Path(cwd, os.path.expandvars(os.path.expanduser(name)))
+        if not p.is_file():
+            return f"Can't read --body-file {name} (resolved from {cwd}); use an absolute path."
+        text += p.read_text(errors="replace")
+    template = ROOT / ".github" / "pull_request_template.md"
+    headings = [ln.strip() for ln in template.read_text().splitlines() if ln.startswith("## ")] if template.is_file() else []
+    missing = [h for h in headings if h not in text]
+    if missing:
+        return f"PR body is missing template sections: {', '.join(missing)}. " + HOW_TO_BODY
+    return None
+
+
 def cmd_pr(base, author):
     errors, warnings = pr_report(base, author)
     ci = os.environ.get("GITHUB_ACTIONS")
@@ -147,11 +196,13 @@ def cmd_hook():
     if event == "PreToolUse" and tool == "Bash":
         if SET_MEMBER.search(cmd):
             pre("ask", "Changing the operator identity (team.member) is for the human only.")
-        elif "gh pr create" in cmd:
+        elif (args := gh_pr_create_args(cmd)) is not None and not {"-h", "--help"} & set(args):
             # shortcut: base is always origin/main, gh's --base flag is ignored
             try:
+                body = pr_body_problem(cmd, args, data.get("cwd") or ROOT)
                 errors, _ = pr_report("origin/main", me())
-            except SystemExit as e:  # exit 1 would be a non-blocking hook error and let the PR through
+                errors = ([body] if body else []) + errors
+            except (Exception, SystemExit) as e:  # a crashing hook exits 1, which doesn't block the PR
                 errors = [f"PR gate could not run: {e}"]
             if errors:
                 pre("deny", "PR gate failed, fix before creating the PR:\n\n" + "\n\n".join(errors))

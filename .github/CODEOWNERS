@@ -6,5 +6,8 @@
 /backend/        @SviatoslavShpylovyi
 /frontend/       @oshuptar
 /presentation/   @oshuptar
-/contracts/      @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar
-/STATE.md        @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar
+/contracts/          @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar
+/contracts/ai/       @glhfsox
+/contracts/data/     @glhfsox @spdsslg
+/contracts/backend/  @SviatoslavShpylovyi
+/STATE.md            @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar
