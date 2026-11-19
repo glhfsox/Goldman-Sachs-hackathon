@@ -31,7 +31,7 @@ jobs:
           ref: dev  # rules come from dev, where they land first, not from the PR being judged
       - uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: "PR #${{ env.PR }} in ${{ github.repository }}, head SHA ${{ env.SHA }}. Decide and act."
           # merge and comment are allowed only for this PR, and merge only at this exact head (--merge is for release PRs dev -> main)
