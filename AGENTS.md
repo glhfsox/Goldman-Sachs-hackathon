@@ -64,8 +64,8 @@ Lives at the repo root, one per person, never committed. The agent maintains it.
   ```
 
 ## Git and PRs
-- Two long-lived branches: `dev` (default; features land here) and `main` (production; changes only through a release PR `dev` → `main`, which the bot merges with a merge commit; the repo owner tags it `vX.Y`).
-- Branch `<login>/<short-name>` from a fresh `dev`, PR back into `dev`. Small PRs that live hours, not days. Squash-merge. No direct pushes to `dev` or `main`.
+- Two long-lived branches: `dev` (integration; features land here) and `main` (production; changes only through a release PR `dev` → `main`, which the bot merges with a merge commit; the repo owner tags it `vX.Y`).
+- Branch `<login>/<short-name>` from a fresh `dev`, PR back into `dev` with `gh pr create -B dev` (the GitHub default branch is `main`, so without `-B` the PR would go there; the hook blocks that). Small PRs that live hours, not days. Squash-merge. No direct pushes to `dev` or `main`.
 - The `pr-merger` bot (`.claude/agents/pr-merger.md`, run by `.github/workflows/auto-merge.yml`) merges PRs automatically once `gate` is green and the zone rules hold. Touched another zone? Its owner approves the PR, then the bot merges. To keep a PR open, make it a draft or add the label `no-automerge`.
 - Before opening a PR, run `python3 scripts/team.py pr`. It's the same gate CI runs: checks of changed zones plus the "contract → STATE.md" rule. The Claude hook runs it automatically before `gh pr create`.
 - The PR description is the filled-in `.github/pull_request_template.md`, passed with `gh pr create --body` or `--body-file`. In non-interactive mode gh ignores the template, so the Claude hook rejects `--fill` and bodies without the template's sections.

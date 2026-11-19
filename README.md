@@ -24,11 +24,11 @@ python3 --version                            # 3.9+ is needed for the hooks
 | CI | `gate` passed / PR approved | `pr-merger` agent (Sonnet, high effort) squash-merges a PR into `dev` or comments what blocks it; a PR into `main` only from `dev`, as a merge commit |
 
 ## Branches and releases
-- `dev` is the default branch: feature branches start from it and PR back into it, and the bot merges them.
+- `dev` is the integration branch: feature branches start from it and PR back into it with `-B dev`, and the bot merges them. GitHub's default branch is `main`, so a PR without `-B` would target it; the hook blocks that.
 - `main` is production. Release = a PR `dev` → `main` (`gh pr create -B main -H dev`); the bot merges it with a merge commit (not squash, so `dev` and `main` don't diverge) and refuses PRs into `main` from any other branch. Then tag it: `git tag v0.1 origin/main && git push origin v0.1`.
 
 ## GitHub (repo owner, once)
-- Default branch: Settings → General → Default branch → `dev`. The bot reads its rules from the default branch.
+- Default branch: `main` (Settings → General → Default branch). The bot reads its rules from `dev` (`.github/workflows/auto-merge.yml`).
 - Invite teammates: Settings → Collaborators.
 - Auto-merge bot: run `claude setup-token` locally, then save the token as the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (`gh secret set CLAUDE_CODE_OAUTH_TOKEN`). Every bot run uses the repo owner's Claude subscription.
 - Branch protection (Settings → Branches → `dev` and `main`: Require a pull request + status check `gate`) and automatic CODEOWNERS review requests need a public repo or GitHub Pro. Without them nothing stops a direct push to `dev` or `main`, but the hooks and the bot read CODEOWNERS themselves, so zone rules still hold for PRs.
