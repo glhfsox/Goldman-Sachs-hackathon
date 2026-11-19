@@ -26,15 +26,15 @@ jobs:
       SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.repository.default_branch }}  # rules come from main, not from the PR being judged
+          ref: dev  # rules come from dev, where they land first, not from the PR being judged
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: "PR #${{ env.PR }} in ${{ github.repository }}, head SHA ${{ env.SHA }}. Decide and act."
-          # merge and comment are allowed only for this PR, and merge only at this exact head
+          # merge and comment are allowed only for this PR, and merge only at this exact head (--merge is for release PRs dev -> main)
           claude_args: >-
             --agent pr-merger --model sonnet --effort high
-            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(sleep:*),Bash(gh pr comment ${{ env.PR }} --body:*),Bash(gh pr merge ${{ env.PR }} --squash --delete-branch --match-head-commit ${{ env.SHA }})"
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(sleep:*),Bash(gh pr comment ${{ env.PR }} --body:*),Bash(gh pr merge ${{ env.PR }} --squash --delete-branch --match-head-commit ${{ env.SHA }}),Bash(gh pr merge ${{ env.PR }} --merge --match-head-commit ${{ env.SHA }})"
