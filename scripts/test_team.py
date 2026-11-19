@@ -67,6 +67,9 @@ assert body(f'gh pr create -t x --body "{filled}"') is None
 assert body(f"git push -f origin HEAD && gh pr create -t x --body '{filled}'") is None
 assert body(f"gh pr create -t x -F - <<'EOF'\n{filled}\ncurl -f localhost\nEOF") is None
 assert body("gh pr create --web") is None
+assert team.pr_base(team.gh_pr_create_args("gh pr create -t x")) == "origin/dev"
+assert team.pr_base(team.gh_pr_create_args("gh pr create -B main -t x")) == "origin/main"
+assert team.pr_base(team.gh_pr_create_args("gh pr create --base=main")) == "origin/main"
 with tempfile.TemporaryDirectory() as tmp:
     (Path(tmp) / "body.md").write_text(filled)
     assert body("gh pr create -t x --body-file body.md", tmp) is None
@@ -74,5 +77,18 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "Can't read" in body("gh pr create -t x -F missing.md", tmp)
     (Path(tmp) / "bad.md").write_bytes(b"\xff\xfe")
     assert body("gh pr create -t x -F bad.md", tmp)  # undecodable bytes give a reason, not a crash
+
+# Codex: apply_patch paths are parsed from the patch, and "ask" becomes "deny" (Codex would let an ask through)
+patch = ("*** Begin Patch\n*** Add File: ai/new.py\n+x\n*** Update File: backend/app.py\n*** Move to: backend/b.py\n"
+         "@@\n-*** Delete File: fake.py\n*** Delete File: data/old.csv\n*** End Patch")
+assert team.patch_paths(patch) == ["ai/new.py", "backend/app.py", "backend/b.py", "data/old.csv"]
+team.me, team.codeowners = lambda: "lead", lambda: RULES
+assert team.edit_problem(["ai/new.py", "../elsewhere.py", "HANDOFF.md"], team.ROOT) is None
+assert team.edit_problem(team.patch_paths(patch), team.ROOT)[0] == "ask"
+import contextlib, io, json
+for codex, want in [(False, "ask"), (True, "deny")]:
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        team.pre("ask", "x", codex)
+    assert json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"] == want
 
 print("test_team: ok")

@@ -1,0 +1,22 @@
+{
+  "description": "Team hooks, same as .claude/settings.json. Logic lives in scripts/team.py.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch)$",
+        "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/team.py\" hook", "timeout": 600 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/team.py\" hook" }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/team.py\" hook", "timeout": 600 }]
+      }
+    ]
+  }
+}
