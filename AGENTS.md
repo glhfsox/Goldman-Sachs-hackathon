@@ -41,7 +41,7 @@ Only what another teammate's agent needs to know so their code doesn't break, or
 - No: bug fixes, refactors inside a zone, styling, tests, perf tweaks without interface changes, WIP.
 - Write only in your operator's section, in the same PR as the change. Newest on top.
 - It's the current picture, not a log: replace or delete superseded entries (git keeps the history). At most 10 entries per section.
-- Format: `- YYYY-MM-DD · **what** — what changed for others. Affects: zones. Where: path.`
+- Format: `- DD-MM HH:MM · **what** — what changed for others. Affects: zones. Where: path.` Time is the team's clock: `TZ=Etc/GMT-1 date +'%d-%m %H:%M'`.
 
 ## Board: fast heads-up between zones (GitHub issues)
 For what can't wait for a merged PR. `STATE.md` and `contracts/` stay the truth; the board is short-lived chatter.
