@@ -214,13 +214,13 @@ def gh_pr_create_args(cmd):
 
 
 def pr_base(args):
-    """Base of a `gh pr create` call as a remote ref: its -B/--base, else DEFAULT_BASE."""
+    """Base of a `gh pr create` call as a remote ref: its -B/--base, else None (gh would pick main, the default)."""
     for i, a in enumerate(args):
         if a in ("-B", "--base") and i + 1 < len(args):
             return "origin/" + args[i + 1]
         if a.startswith("--base="):
             return "origin/" + a.split("=", 1)[1]
-    return DEFAULT_BASE
+    return None
 
 
 def pr_body_problem(cmd, args, cwd):
@@ -304,7 +304,11 @@ def cmd_hook():
         elif (args := gh_pr_create_args(cmd)) is not None and not {"-h", "--help"} & set(args):
             try:
                 body = pr_body_problem(cmd, args, data.get("cwd") or ROOT)
-                errors, _ = pr_report(pr_base(args), me())
+                if (base := pr_base(args)) is None:
+                    errors = ["No -B: gh would open the PR into main (the default branch). "
+                              "Feature PR: `gh pr create -B dev ...`; release: `gh pr create -B main -H dev ...`."]
+                else:
+                    errors, _ = pr_report(base, me())
                 errors = ([body] if body else []) + errors
             except (Exception, SystemExit) as e:  # a crashing hook exits 1, which doesn't block the PR
                 errors = [f"PR gate could not run: {e}"]
