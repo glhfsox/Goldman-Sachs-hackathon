@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Shared rules for every agent (and human) in this repo. Hackathon: the goal is a working PoC/MVP as fast as possible. Speed beats polish, but `main` always runs.
+Shared rules for every agent (and human) in this repo. Hackathon: the goal is a working PoC/MVP as fast as possible. Speed beats polish, but `dev` always runs, and `main` is the released version.
 
 ## Session start
 1. Find your operator: `git config team.member` (GitHub login). If it's empty, stop and ask the human to run `git config team.member <login>`. Never set it yourself.
@@ -57,8 +57,9 @@ Lives at the repo root, one per person, never committed. The agent maintains it.
   ```
 
 ## Git and PRs
-- Branch `<login>/<short-name>` from a fresh `main`. Small PRs that live hours, not days. Squash-merge. No direct pushes to `main`.
-- The `pr-merger` bot (`.claude/agents/pr-merger.md`, run by `.github/workflows/auto-merge.yml`) merges PRs automatically once `gate` is green and the zone rules hold. Touched another zone? Its owner approves the PR, then the bot merges. To keep a PR open, make it a draft or add the label `no-automerge`.
+- Two long-lived branches: `dev` (default; features land here) and `main` (production; changes only through a release PR `dev` → `main` that the repo owner merges by hand, then tags `vX.Y`).
+- Branch `<login>/<short-name>` from a fresh `dev`, PR back into `dev`. Small PRs that live hours, not days. Squash-merge. No direct pushes to `dev` or `main`.
+- The `pr-merger` bot (`.claude/agents/pr-merger.md`, run by `.github/workflows/auto-merge.yml`) merges PRs into `dev` automatically once `gate` is green and the zone rules hold. Touched another zone? Its owner approves the PR, then the bot merges. To keep a PR open, make it a draft or add the label `no-automerge`.
 - Before opening a PR, run `python3 scripts/team.py pr`. It's the same gate CI runs: checks of changed zones plus the "contract → STATE.md" rule. The Claude hook runs it automatically before `gh pr create`.
 - The PR description is the filled-in `.github/pull_request_template.md`, passed with `gh pr create --body` or `--body-file`. In non-interactive mode gh ignores the template, so the Claude hook rejects `--fill` and bodies without the template's sections.
 - Never commit secrets or `.env` (keep a `.env.example` in the zone), raw data or model weights.

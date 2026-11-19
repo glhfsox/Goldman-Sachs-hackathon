@@ -67,6 +67,9 @@ assert body(f'gh pr create -t x --body "{filled}"') is None
 assert body(f"git push -f origin HEAD && gh pr create -t x --body '{filled}'") is None
 assert body(f"gh pr create -t x -F - <<'EOF'\n{filled}\ncurl -f localhost\nEOF") is None
 assert body("gh pr create --web") is None
+assert team.pr_base(team.gh_pr_create_args("gh pr create -t x")) == "origin/dev"
+assert team.pr_base(team.gh_pr_create_args("gh pr create -B main -t x")) == "origin/main"
+assert team.pr_base(team.gh_pr_create_args("gh pr create --base=main")) == "origin/main"
 with tempfile.TemporaryDirectory() as tmp:
     (Path(tmp) / "body.md").write_text(filled)
     assert body("gh pr create -t x --body-file body.md", tmp) is None

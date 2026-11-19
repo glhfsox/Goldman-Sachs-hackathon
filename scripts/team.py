@@ -2,7 +2,7 @@
 """Team checks and Claude Code / Codex hooks. Stdlib only.
 
   python3 scripts/team.py check                                     # check.sh of zones changed in the working tree
-  python3 scripts/team.py pr [--base origin/main] [--author LOGIN]  # PR gate, CI runs the same
+  python3 scripts/team.py pr [--base origin/dev] [--author LOGIN]   # PR gate, CI runs the same
   python3 scripts/team.py hook                                      # Claude Code / Codex hook entry point (JSON on stdin)
 """
 import argparse
@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_BASE = "origin/dev"  # feature PRs go to dev; dev -> main is a release
 COMMIT = re.compile(r"\bgit\b[^|;&]*\bcommit\b")
 SET_MEMBER = re.compile(r"team\.member[ \t]+[^\s|;&)]|unset\S*\s+team\.member")  # writes, not `git config team.member`
 GH_PR_CREATE = re.compile(r"(?:^|[;&|(\n])\s*gh\s+pr\s+create\b")
@@ -128,6 +129,16 @@ def gh_pr_create_args(cmd):
     return None
 
 
+def pr_base(args):
+    """Base of a `gh pr create` call as a remote ref: its -B/--base, else DEFAULT_BASE."""
+    for i, a in enumerate(args):
+        if a in ("-B", "--base") and i + 1 < len(args):
+            return "origin/" + args[i + 1]
+        if a.startswith("--base="):
+            return "origin/" + a.split("=", 1)[1]
+    return DEFAULT_BASE
+
+
 def pr_body_problem(cmd, args, cwd):
     """gh ignores the PR template in non-interactive mode, so `gh pr create` must carry the filled-in template."""
     if any(a in ("-w", "--web") for a in args):
@@ -207,10 +218,9 @@ def cmd_hook():
         if SET_MEMBER.search(cmd):
             pre("ask", "Changing the operator identity (team.member) is for the human only.", codex)
         elif (args := gh_pr_create_args(cmd)) is not None and not {"-h", "--help"} & set(args):
-            # shortcut: base is always origin/main, gh's --base flag is ignored
             try:
                 body = pr_body_problem(cmd, args, data.get("cwd") or ROOT)
-                errors, _ = pr_report("origin/main", me())
+                errors, _ = pr_report(pr_base(args), me())
                 errors = ([body] if body else []) + errors
             except (Exception, SystemExit) as e:  # a crashing hook exits 1, which doesn't block the PR
                 errors = [f"PR gate could not run: {e}"]
@@ -233,7 +243,7 @@ def cmd_hook():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["check", "pr", "hook"])
-    ap.add_argument("--base", default="origin/main")
+    ap.add_argument("--base", default=DEFAULT_BASE)
     ap.add_argument("--author")
     a = ap.parse_args()
     if a.cmd == "hook":

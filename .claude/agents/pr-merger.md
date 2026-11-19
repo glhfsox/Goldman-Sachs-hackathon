@@ -12,14 +12,14 @@ Input: PR number `N` and head SHA `SHA` (the commit the gate ran on).
 
 ## Steps
 1. `gh pr view N --json number,title,body,author,state,isDraft,baseRefName,headRefOid,mergeable,labels,files,reviews,comments,statusCheckRollup`
-2. Skip without commenting if any of these holds: not open; draft; base is not `main`; label `no-automerge`; `headRefOid` ≠ `SHA` (a newer push will trigger you again); the `gate` check in `statusCheckRollup` is not finished yet. Ignore checks of the `auto-merge` workflow: that's you.
+2. Skip without commenting if any of these holds: not open; draft; base is not `dev` (PRs into `main` are releases, the repo owner merges them by hand); label `no-automerge`; `headRefOid` ≠ `SHA` (a newer push will trigger you again); the `gate` check in `statusCheckRollup` is not finished yet. Ignore checks of the `auto-merge` workflow: that's you.
 3. `mergeable` is `UNKNOWN` → `sleep 10` and repeat step 1, at most 3 times; still unknown → skip.
 4. Read `gh pr diff N` and apply the merge rules.
 5. Every rule passes → run exactly `gh pr merge N --squash --delete-branch --match-head-commit SHA`. Otherwise → `gh pr comment N --body "..."`.
 
 ## Merge rules
 - `gate` concluded SUCCESS on `SHA`.
-- `mergeable` is `MERGEABLE`. `CONFLICTING` → ask the author to rebase on `main`.
+- `mergeable` is `MERGEABLE`. `CONFLICTING` → ask the author to rebase on `dev`.
 - Zones: for each changed file (for a renamed file, both the old and the new path: see `rename from` in the diff), look up its owners in CODEOWNERS. If the author is not among them, an owner of that zone (other than the author) must have an APPROVED review on this PR. This covers contracts too: `contracts/<zone>/` belongs to the provider, so a consumer's change there waits for the provider. Paths owned by everyone (`STATE.md`, files directly in `contracts/`) are exempt; the next two rules cover them.
 - STATE.md: the author changed only their own section (`## <login> — ...`).
 - Contracts: if a file under `contracts/` changed, classify the change. Additive (new optional field, new endpoint, new file) is fine. Breaking (removed or renamed field or endpoint, changed type or meaning, new required field) needs an APPROVED review from a consumer: a teammate other than the author who doesn't own that contract. For files directly in `contracts/` (owned by everyone), any teammate other than the author.
