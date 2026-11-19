@@ -19,6 +19,7 @@ python3 --version                            # 3.9+ is needed for the hooks
 | Claude, Codex | `git commit` | reminds the agent to update HANDOFF.md / STATE.md |
 | Claude, Codex | `gh pr create` | requires the filled-in PR template and runs the PR gate; on errors, blocks the PR |
 | Claude, Codex | end of turn | `check.sh` of changed zones; red → the agent keeps fixing |
+| Claude, Codex | session start, then every 10 min | board: GitHub issues for your zones (`team.py post` / `board`); at start all open ones, then only new or updated; closes messages idle for 3 h |
 | CI | every PR | PR gate: `check.sh` of changed zones, "contracts/ → STATE.md", warnings about other zones |
 | CI | `gate` passed / PR approved | `pr-merger` agent (Sonnet, high effort) squash-merges a PR into `dev` or comments what blocks it; a PR into `main` only from `dev`, as a merge commit |
 

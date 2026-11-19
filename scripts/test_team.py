@@ -91,4 +91,22 @@ for codex, want in [(False, "ask"), (True, "deny")]:
         team.pre("ask", "x", codex)
     assert json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"] == want
 
+# board: TTL by last activity, only my zones, never my own posts, capped output
+from datetime import datetime, timedelta, timezone
+assert team.zones(real) == ["ai", "data", "backend", "frontend", "presentation"]
+now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
+issue = lambda n, who, zs, hours: {"number": n, "title": f"t{n}", "author": {"login": who},
+                                   "labels": [{"name": "board"}] + [{"name": f"zone:{z}"} for z in zs],
+                                   "updatedAt": (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+expired, lines = team.board_view([issue(1, "Bob", ["data"], 1), issue(2, "Bob", ["data"], 4),
+                                  issue(3, "Bob", ["frontend"], 1), issue(4, "Lead", ["data"], 1),
+                                  issue(5, "Ann", ["backend", "data"], 0.5)], "lead", {"data", "ai"}, now)
+assert expired == [2], expired  # stale ones expire even when they aren't for me
+assert lines == ["#5 @Ann [backend,data] t5", "#1 @Bob [data] t1"], lines  # newest first
+seen = {"1": issue(1, "Bob", ["data"], 1)["updatedAt"], "5": "2026-01-01T00:00:00Z"}
+_, lines = team.board_view([issue(1, "Bob", ["data"], 1), issue(5, "Ann", ["data"], 0.5)], "lead", {"data"}, now, seen)
+assert lines == ["#5 @Ann [data] t5"], lines  # #1 was already shown; #5 changed since
+_, lines = team.board_view([issue(n, "Bob", ["data"], 0) for n in range(15)], "lead", {"data"}, now)
+assert len(lines) == team.BOARD_SHOWN + 1 and lines[-1].startswith("(+5 older")
+
 print("test_team: ok")

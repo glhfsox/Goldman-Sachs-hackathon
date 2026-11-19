@@ -8,8 +8,17 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
         "hooks": [{ "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/team.py\" hook" }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/team.py\" hook", "timeout": 60 }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/team.py\" hook", "timeout": 60 }]
       }
     ],
     "Stop": [
