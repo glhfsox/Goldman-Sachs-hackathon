@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Team checks and Claude Code hooks. Stdlib only.
+"""Team checks and Claude Code / Codex hooks. Stdlib only.
 
   python3 scripts/team.py check                                     # check.sh of zones changed in the working tree
   python3 scripts/team.py pr [--base origin/main] [--author LOGIN]  # PR gate, CI runs the same
-  python3 scripts/team.py hook                                      # Claude Code hook entry point (JSON on stdin)
+  python3 scripts/team.py hook                                      # Claude Code / Codex hook entry point (JSON on stdin)
 """
 import argparse
 import json
@@ -164,28 +164,37 @@ def cmd_pr(base, author):
     print("PR gate passed")
 
 
-def pre(decision, reason):
+def pre(decision, reason, codex=False):
+    if codex and decision == "ask":  # Codex doesn't support "ask": it would let the call through
+        reason = reason.replace(" Allow only if you explicitly asked for this change.", "")
+        decision, reason = "deny", reason + " Codex can't ask the human to confirm: the operator makes this change themselves."
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": decision, "permissionDecisionReason": reason}}))
 
 
-def guard_edit(path):
-    if not path:
-        return
-    try:
-        rel = Path(path).resolve().relative_to(ROOT).as_posix()
-    except ValueError:
-        return  # outside the repo: not our business
-    if rel == "HANDOFF.md":
-        return
-    who = me()
-    if not who:
-        return pre("deny", "Operator not set. Ask the human to run "
-                           "`git config team.member <github-login>` (never set it yourself).")
-    rules = codeowners()
-    if not owns(who, rel, rules):
-        pre("ask", f"{rel} is in the zone of {' '.join(owners_of(rel, rules)) or 'nobody'}, not @{who}. "
-                   "Allow only if you explicitly asked for this change.")
+def patch_paths(patch):
+    """Files touched by a Codex apply_patch body."""
+    return re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+?)\s*$", patch, re.M)
+
+
+def edit_problem(paths, cwd):
+    """(decision, reason) for the first edited file outside the operator's zone, else None."""
+    for path in filter(None, paths):
+        try:
+            rel = Path(cwd, path).resolve().relative_to(ROOT).as_posix()
+        except ValueError:
+            continue  # outside the repo: not our business
+        if rel == "HANDOFF.md":
+            continue
+        who = me()
+        if not who:
+            return "deny", ("Operator not set. Ask the human to run "
+                            "`git config team.member <github-login>` (never set it yourself).")
+        rules = codeowners()
+        if not owns(who, rel, rules):
+            return "ask", (f"{rel} is in the zone of {' '.join(owners_of(rel, rules)) or 'nobody'}, not @{who}. "
+                           "Allow only if you explicitly asked for this change.")
+    return None
 
 
 def cmd_hook():
@@ -193,9 +202,10 @@ def cmd_hook():
     event, tool = data.get("hook_event_name"), data.get("tool_name")
     inp = data.get("tool_input") or {}
     cmd = inp.get("command", "")
+    codex = "turn_id" in data  # Codex-only field
     if event == "PreToolUse" and tool == "Bash":
         if SET_MEMBER.search(cmd):
-            pre("ask", "Changing the operator identity (team.member) is for the human only.")
+            pre("ask", "Changing the operator identity (team.member) is for the human only.", codex)
         elif (args := gh_pr_create_args(cmd)) is not None and not {"-h", "--help"} & set(args):
             # shortcut: base is always origin/main, gh's --base flag is ignored
             try:
@@ -207,7 +217,9 @@ def cmd_hook():
             if errors:
                 pre("deny", "PR gate failed, fix before creating the PR:\n\n" + "\n\n".join(errors))
     elif event == "PreToolUse":
-        guard_edit(inp.get("file_path") or inp.get("notebook_path"))
+        paths = patch_paths(cmd) if tool == "apply_patch" else [inp.get("file_path") or inp.get("notebook_path")]
+        if problem := edit_problem(paths, data.get("cwd") or ROOT):
+            pre(*problem, codex)
     elif event == "PostToolUse" and tool == "Bash" and COMMIT.search(cmd):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": REMINDER}}))
     elif event == "Stop" and not data.get("stop_hook_active"):
