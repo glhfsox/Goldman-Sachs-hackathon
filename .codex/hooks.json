@@ -9,8 +9,17 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^Bash$",
         "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/team.py\" hook" }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/team.py\" hook", "timeout": 60 }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/team.py\" hook", "timeout": 60 }]
       }
     ],
     "Stop": [
