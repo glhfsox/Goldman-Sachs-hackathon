@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Shared rules for every agent (and human) in this repo. Hackathon: the goal is a working PoC/MVP as fast as possible. Speed beats polish, but `dev` always runs, and `main` is the released version.
+Shared rules for every agent (and human) in this repo. Hackathon: the goal is a working PoC/MVP as fast as possible. Speed beats polish, but `dev` always runs, and `main` is the released version. Setup after cloning and what the hooks do: [Instructions.md](Instructions.md).
 
 ## Session start
 1. Find your operator: `git config team.member` (GitHub login). If it's empty, stop and ask the human to run `git config team.member <login>`. Never set it yourself.

@@ -2,7 +2,7 @@ import team
 
 RULES = [("*", ["@lead"]), ("/data/", ["@lead", "@d"]), ("/backend/", ["@Bob"]), ("/STATE.md", ["@lead", "@Bob"])]
 
-assert team.owners_of("README.md", RULES) == ["@lead"]
+assert team.owners_of("Instructions.md", RULES) == ["@lead"]
 assert team.owners_of("backend/app/main.py", RULES) == ["@Bob"]
 assert team.owners_of("backendx/main.py", RULES) == ["@lead"]
 assert team.owners_of("STATE.md", RULES) == ["@lead", "@Bob"]
