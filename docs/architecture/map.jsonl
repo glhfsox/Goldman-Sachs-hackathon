@@ -1,0 +1,35 @@
+{"id":"sources","kind":"external","purpose":"Systems that emit events: HTTP webhooks and source.* Kafka topics","out":["raw payload"]}
+{"id":"ingest","kind":"service","area":"backend","purpose":"Source adapters: receive a payload, stamp event_id, source_id and received_at, enqueue it","in":["raw payload"],"out":["raw event"]}
+{"id":"events_raw","kind":"topic","area":"infra","purpose":"Kafka topic events.raw: durable buffer of raw events, keyed by source_id"}
+{"id":"processor","kind":"service","area":"backend","purpose":"Applies schema mappings, matches rules, deduplicates and groups per rule, links alerts into incidents","in":["raw event","rules","mappings"],"out":["alert change"]}
+{"id":"alerts_changes","kind":"topic","area":"infra","purpose":"Kafka topic alerts.changes: alert state changes, keyed by alert_id"}
+{"id":"notifier","kind":"service","area":"backend","purpose":"Notification policy, outbox with retry and fallback, channel adapters, escalation, digests, auto-resolve","in":["alert change"],"out":["notification"]}
+{"id":"channels","kind":"external","purpose":"Delivery targets, mocked: MailHog SMTP and a logging SMS and call gateway"}
+{"id":"redis","kind":"store","area":"infra","purpose":"Dedup windows and counters; pub/sub channel ui.alerts for live UI updates"}
+{"id":"postgres","kind":"store","area":"infra","purpose":"Rules, mappings, alerts, incidents, timeline, notification outbox, teams, preferences, runbooks, action runs"}
+{"id":"api","kind":"service","area":"backend","purpose":"REST and WebSocket for the UI: rules, preferences, ack and resolve, runbook lookup, action runner with approval"}
+{"id":"web_ui","kind":"ui","area":"frontend","purpose":"Live alert feed, alert card with runbook and timeline, rule editor, channel preferences"}
+{"id":"ai_worker","kind":"service","area":"backend","purpose":"Off the event path: proposes mappings for new schemas and converts runbooks to the canonical form"}
+{"id":"claude_api","kind":"external","purpose":"LLM API called by the AI worker only, never per event"}
+
+{"from":"sources","to":"ingest","data":"raw payload"}
+{"from":"ingest","to":"events_raw","data":"raw event"}
+{"from":"events_raw","to":"processor","data":"raw event"}
+{"from":"postgres","to":"processor","data":"rules, mappings"}
+{"from":"processor","to":"redis","data":"dedup counters, ui.alerts"}
+{"from":"processor","to":"postgres","data":"alerts, incidents, schema samples"}
+{"from":"processor","to":"alerts_changes","data":"alert change"}
+{"from":"alerts_changes","to":"notifier","data":"alert change"}
+{"from":"postgres","to":"notifier","data":"rules, on-call, preferences"}
+{"from":"notifier","to":"postgres","data":"notifications, delivery status"}
+{"from":"notifier","to":"alerts_changes","data":"auto-resolved"}
+{"from":"notifier","to":"channels","data":"rendered message"}
+{"from":"redis","to":"api","data":"ui.alerts"}
+{"from":"postgres","to":"api","data":"alerts, timeline, config"}
+{"from":"api","to":"postgres","data":"rules, ack and resolve, action runs"}
+{"from":"api","to":"alerts_changes","data":"acked, resolved"}
+{"from":"api","to":"web_ui","data":"REST, WebSocket"}
+{"from":"web_ui","to":"api","data":"user actions"}
+{"from":"postgres","to":"ai_worker","data":"schema samples, runbook drafts"}
+{"from":"ai_worker","to":"postgres","data":"mappings, canonical runbooks"}
+{"from":"ai_worker","to":"claude_api","data":"sample payload, runbook text"}
