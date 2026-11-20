@@ -49,7 +49,7 @@ real = team.codeowners()
 patterns = [p for p, _ in real]
 for zone in ["ai", "data", "backend", "frontend", "presentation", "contracts"]:
     assert f"/{zone}/" in patterns, zone
-assert team.owners_of("contracts/backend/api.md", real) == ["@SviatoslavShpylovyi"]
+assert team.owners_of("contracts/backend/api.md", real) == ["@SviatoslavShpylovyi", "@oshuptar"]
 assert team.owners_of("contracts/data/dataset.md", real) == ["@glhfsox", "@spdsslg"]
 assert len(team.owners_of("contracts/ports.md", real)) == 4
 
