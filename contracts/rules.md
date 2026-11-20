@@ -64,8 +64,8 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
 - The severity value is looked up in `severity_map` case-insensitively; values already on the scale pass through.
 - `dedup_fields` become the envelope's `dedup_hints`.
 - `status`: `active` or `disabled`. `origin`: `seed`, `human` or `llm`.
-- Onboarding a new schema: the processor stores one sample per unknown shape in `schema_samples`;
-  the AI worker asks Claude for a mapping object and saves it as `active` if every `path` resolves on
+- Onboarding a new schema: the processor publishes one sample per unknown shape to Kafka `schema.samples`
+  ([events.md](events.md) §8); the AI worker asks Claude for a mapping object and saves it through the API as `active` if every `path` resolves on
   the sample, the severity is on the scale and `ts` parses. Otherwise the sample is marked `failed` and
   a person writes the mapping in the UI. Only events that arrive after the mapping is active use it;
   earlier ones stay unmapped.
@@ -100,14 +100,15 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
   mechanism: every matching event with the same key increments that alert's `count`. Default when omitted:
   `["type", "service"]` plus the envelope's `dedup_hints`.
 - `window_s` (default 300): the alert stays open for events with its key until none has arrived for
-  `window_s`; then it auto-resolves. An event within another `window_s` after that reopens it.
+  `window_s`; then the processor auto-resolves it. An event within another `window_s` after that reopens it.
 - `route.recipients`: `{"team": id}` (all members), `{"team": id, "on_call": true}` or `{"user": id}`.
 - `route.channels`: any of `ui`, `email`, `sms`, `call`. When omitted, each recipient's own preferences
   decide. Quiet hours and the per-hour limit from preferences always apply.
 - `present.color`: `red`, `orange`, `yellow`, `blue` or `grey`. Templates use `{{path}}`.
 - A person matched by several rules for one incident gets one message.
 - An invalid rule is rejected by the API with `422` and never reaches the processor (see [api.md](api.md)).
-- The processor reloads rules and mappings within 5 s of a change (it polls `updated_at`).
+- The processor reloads rules and mappings within 5 s of a change (they arrive on Kafka `config.changes`,
+  [events.md](events.md) §6).
 
 The other three example rules from the brief, as `when` / `alert_key` / `route` / `present`:
 
