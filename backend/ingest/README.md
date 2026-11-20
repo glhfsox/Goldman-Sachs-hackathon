@@ -14,4 +14,5 @@ curl http://localhost:8001/health
 
 ```bash
 ./check.sh                       # build + unit tests
+RUN_INTEGRATION=1 ./check.sh     # also container tests (needs Docker)
 ```
