@@ -1,10 +1,11 @@
-# OVERVIEW — the hackathon task
+# OVERVIEW — the hackathon task and our architecture
 
-> **This file only describes the problem. It is not a task, plan or architecture.**
-> It is a summary of the organisers' brief ("Hackathon 2026 — Software Engineering"),
-> so that any agent knows what the project is about and what it will be judged on.
+> **Part 1 (down to "Submission") only describes the problem.** It is a summary of the organisers' brief
+> ("Hackathon 2026 — Software Engineering"), so that any agent knows what the project is about and what
+> it will be judged on. Sample values were transcribed from photos.
+> **Part 2, "Architecture", is the design the team agreed on.** Interfaces live in `contracts/`,
+> cross-zone changes in `STATE.md`.
 > Do not build anything because of this file; act only on what your operator asks.
-> Architecture and interfaces live in `contracts/` and `STATE.md`. Sample values were transcribed from photos.
 
 ## Product: Flexible Alerting & Notification Service
 
@@ -150,3 +151,166 @@ Free text (from a wiki or chat):
 - Upload to Lockbox in a directory named after the team. Recommended: also a text file with
   links to the Git repo and/or a demo app.
 - After the first round, the top five teams present live in the final, followed by Q&A.
+
+---
+
+## Architecture
+
+Agreed on 20-11. Five services (Ingest, Processor, Notifier, API and an off-path AI worker) on Kafka,
+Redis and Postgres. No Claude call is made per event. Alerts are stored, deduplicated after rule match,
+and delivered through a policy layer with retries. Each service's code lives in `backend/<service>/`.
+Interfaces: [contracts/](contracts/services.md). Machine-readable map: `docs/architecture/map.jsonl`.
+Nothing is built or measured yet.
+
+### At a glance
+
+<!-- arch:diagram -->
+```mermaid
+flowchart TB
+  n_sources(["<b>sources</b><br/><small>external</small>"])
+  n_channels(["<b>channels</b><br/><small>external</small>"])
+  n_claude_api(["<b>claude_api</b><br/><small>external</small>"])
+  subgraph a_backend ["backend"]
+    n_ingest("<b>ingest</b><br/><small>service</small>")
+    n_processor("<b>processor</b><br/><small>service</small>")
+    n_notifier("<b>notifier</b><br/><small>service</small>")
+    n_api("<b>api</b><br/><small>service</small>")
+    n_ai_worker("<b>ai_worker</b><br/><small>service</small>")
+  end
+  subgraph a_infra ["infra"]
+    n_events_raw("<b>events_raw</b><br/><small>topic</small>")
+    n_alerts_changes("<b>alerts_changes</b><br/><small>topic</small>")
+    n_redis[("<b>redis</b><br/><small>store</small>")]
+    n_postgres[("<b>postgres</b><br/><small>store</small>")]
+  end
+  subgraph a_frontend ["frontend"]
+    n_web_ui("<b>web_ui</b><br/><small>ui</small>")
+  end
+  n_sources -- "raw payload" --> n_ingest
+  n_ingest -- "raw event" --> n_events_raw
+  n_events_raw -- "raw event" --> n_processor
+  n_postgres -- "rules, mappings" --> n_processor
+  n_processor -- "dedup counters, ui.alerts" --> n_redis
+  n_processor -- "alerts, incidents, schema samples" --> n_postgres
+  n_processor -- "alert change" --> n_alerts_changes
+  n_alerts_changes -- "alert change" --> n_notifier
+  n_postgres -- "rules, on-call, preferences" --> n_notifier
+  n_notifier -- "notifications, delivery status" --> n_postgres
+  n_notifier -- "auto-resolved" --> n_alerts_changes
+  n_notifier -- "rendered message" --> n_channels
+  n_redis -- "ui.alerts" --> n_api
+  n_postgres -- "alerts, timeline, config" --> n_api
+  n_api -- "rules, ack and resolve, action runs" --> n_postgres
+  n_api -- "acked, resolved" --> n_alerts_changes
+  n_api -- "REST, WebSocket" --> n_web_ui
+  n_web_ui -- "user actions" --> n_api
+  n_postgres -- "schema samples, runbook drafts" --> n_ai_worker
+  n_ai_worker -- "mappings, canonical runbooks" --> n_postgres
+  n_ai_worker -- "sample payload, runbook text" --> n_claude_api
+  classDef k0 fill:#dbeafe,stroke:#2563eb,color:#111827
+  class n_sources,n_channels,n_claude_api k0
+  classDef k1 fill:#dcfce7,stroke:#16a34a,color:#111827
+  class n_ingest,n_processor,n_notifier,n_api,n_ai_worker k1
+  classDef k2 fill:#fef3c7,stroke:#d97706,color:#111827
+  class n_events_raw,n_alerts_changes k2
+  classDef k3 fill:#fce7f3,stroke:#db2777,color:#111827
+  class n_redis,n_postgres k3
+  classDef k4 fill:#ede9fe,stroke:#7c3aed,color:#111827
+  class n_web_ui k4
+```
+<!-- /arch:diagram -->
+
+Events run Sources → Ingest → `events.raw` → Processor → `alerts.changes` → Notifier → channels.
+The API, UI and AI worker reach the event path only through the stores.
+
+### Services
+
+Every service is stateless; all state sits in Kafka, Redis or Postgres, so each one runs in two or more replicas.
+
+| Service | Does | State it uses | Scales by |
+|---|---|---|---|
+| Ingest (`backend/ingest`) | Source adapters (HTTP webhook, Kafka `source.*` topics on the same cluster). Stamps `event_id`, `source_id`, `received_at` and writes the raw payload to `events.raw`. No other logic. | Source configs (Postgres) | Replicas behind a load balancer |
+| Processor (`backend/processor`) | Applies the stored schema mapping, or marks the event unmapped. Evaluates rules. Deduplicates and groups per rule. Links related alerts into incidents. Writes alert state and publishes state changes to `alerts.changes`. | Mappings and rules (Postgres, cached in memory), windows and counters (Redis), alerts and incidents (Postgres) | Kafka partitions of `events.raw` |
+| Notifier (`backend/notifier`) | Policy: who is told, when, on which channel, in one message or a digest. Writes notification rows with a send time. Workers send through channel adapters with retry, backoff and a fallback channel. A scheduler loop runs escalation steps, digests and auto-resolve. | Notification outbox, preferences, on-call (Postgres) | Workers claiming rows with `SKIP LOCKED` |
+| API (`backend/api`) | REST and WebSocket for the UI: live feed, ack and resolve, rules, mappings, preferences, runbooks, approvals, improvement proposals. Hosts the runbook module: lookup, placeholder fill, and the action runner with its approval gate. | Everything in Postgres; pushes via Redis pub/sub | Replicas; any replica can push to any browser |
+| AI worker (`backend/ai-worker`) | Off the event path. Proposes a mapping for a new schema, converts an uploaded runbook to the canonical form, and drafts runbook updates from action logs. | Pending schema samples and runbook drafts (Postgres) | One or two workers with a concurrency cap |
+
+Shared infrastructure: one Kafka cluster with two internal topics (`events.raw`, `alerts.changes`), Redis,
+Postgres. Mocks: MailHog for email, a logging gateway for SMS and calls, and a small target service that
+runbook actions call.
+
+### How one event flows
+
+1. A source sends an event. Ingest stamps `event_id`, `source_id` and `received_at`, writes the raw payload
+   to `events.raw`, and acknowledges the source only after Kafka confirms.
+2. A Processor replica reads it and finds the mapping whose `match` condition fits. It builds the envelope
+   `{source, type, severity, env, service, ts, dedup_hints, raw}`. With no mapping it builds an unmapped
+   envelope with defaults and saves a sample for the AI worker.
+3. It evaluates every team's rules against the envelope and `raw`. Each matching rule yields an alert key
+   from that rule's `alert_key` and window settings.
+4. For each key, one atomic Redis operation either opens a new alert or bumps its counter and `last_seen`.
+5. A new alert is written to Postgres and joined to an open incident when an upstream service in the
+   `depends_on` map already has one. Counter bumps are flushed in batches.
+6. State changes (new, severity up, resolved) go to `alerts.changes` for the Notifier and to Redis pub/sub,
+   from which the API pushes them to open browsers.
+7. Notifier resolves recipients (rule routing, then team, then members or on-call, then personal
+   preferences), keeps one message per person, and writes notification rows with a send time: now, the next
+   escalation step, or the next digest.
+8. A worker renders the message per channel, attaches the runbook with event values filled in, and sends
+   it. Failures retry with backoff, then use the fallback channel. An ack cancels rows still pending.
+9. In the UI a person acks, runs a runbook action, or approves a risky one. The API publishes ack and
+   resolve as alert changes too. Every step is recorded on the alert timeline.
+
+Latency is measured from `received_at` in step 1 to the send timestamp the mock channel logs in step 8.
+
+### What changed from the first proposal
+
+Seven services and five Kafka topics became five services and two topics. The last column names what
+each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-criteria.md)).
+
+| Area | Proposed | Final | Needed for |
+|---|---|---|---|
+| Normalization | Claude maps every payload | Claude writes a mapping once per schema; Processor applies it | AC-2.2, AC-9.2 |
+| Unknown schema | No path when the LLM fails or is slow | Event shown as unmapped at once; mapping proposed in the background | AC-2.1 |
+| Ingest | Preprocesses payloads; hand-off undecided | Receives, stamps, enqueues; acknowledges after Kafka confirms | AC-1.2, AC-9.2 |
+| Dedup | Separate job before the Rule Engine | Step in Processor after rule match, keyed by the rule's settings | AC-4.1, AC-4.4 |
+| Aggregation | Per routed bucket | Incidents correlated across teams with a `depends_on` service map | AC-4.2 |
+| Routing | One Kafka topic per team or role | One topic; team and recipients are fields on the alert | AC-3.2, AC-5.3 |
+| Alert state | Absent | Alerts, incidents and a timeline in Postgres; open, acked, resolved | AC-4.3, AC-7.3 |
+| Notification policy | Absent | Policy step in Notifier: state-change triggers, escalation ladder, digest, rate limit, quiet hours | AC-5.3 to AC-5.6 |
+| Delivery | Direct send | Outbox rows with idempotency key, retry, backoff, fallback channel | AC-6.2, AC-6.3 |
+| Channels | SMTP, SMS, phone | UI added as a channel; message rendered per channel | AC-6.1, AC-8.1 |
+| UI and API | Absent | API service with REST and WebSocket | AC-8.1 to AC-8.4 |
+| Runbook Service | Pipeline stage after aggregation | Lookup at render time; conversion once on upload, confirmed by a person | AC-7.1 |
+| Runbook storage | Blob plus Kafka, undecided | Postgres rows: original, canonical form, version, status | AC-9.1 |
+| Runbook execution | Automatic, before notification, no human | Started from the UI after notification; approval required by default for anything that changes state | Brief 2.6, AC-7.3 |
+| Step failure | Falls back to the LLM | Stops and escalates to a person; the LLM only suggests text | Brief 2.6 |
+| Learned execution graphs | Reused automatically | Filed as a proposed runbook update the owner accepts or rejects | AC-8.4 |
+| Actions | Execution graph, registry unspecified | Plugins: one file plus a config entry per action type | AC-7.4 |
+
+### Open points resolved
+
+| Question | Decision | Reason |
+|---|---|---|
+| Merge Ingest and Normalization? | No. Kafka stays between them; normalization moves into Processor | The buffer keeps events while processing is down |
+| How does Ingest hand events over? | Kafka topic `events.raw` | Durable, replayable, and the unit of horizontal scale |
+| Runbook storage | Postgres | Small records that need lookup by rule and type, and versions |
+| Should the Runbook Service consume aggregation output? | No. Runbooks are looked up at render time | Notifications never wait on runbooks |
+| Dedup and aggregation at two pipeline stages? | One stage, after rules, inside Processor | The dedup key is a rule setting; window state lives in one place |
+| Who decides when and how often a person is notified? | The policy step in Notifier | Keeps what happened apart from who is disturbed |
+| Where do alert state, the UI and the audit log live? | Postgres, served by the API; the audit log is the alert timeline | One source for the feed, the timeline and delivery status |
+| What triggers a normal notification, and where are recipients resolved? | An alert state change; resolved in Notifier at that moment | Counter bumps never notify; preferences and on-call are read fresh |
+
+### Decisions on defaults (confirmed 20-11)
+
+- Second source type: `source.*` topics on the same Kafka cluster.
+- New schema: a Claude-proposed mapping is applied automatically once it validates on the stored sample.
+- Unmapped events: only events arriving after the mapping is active use it; no replay.
+- Rule language: a JSON tree of `{all / any: [{field, op, value}]}`, shared by rules, mapping `match` and
+  runbook `matches` ([contracts/rules.md](contracts/rules.md)).
+- Dedup and correlation windows: 5 minutes by default, per rule; an estimate, not measured.
+- Defaults that stand until someone objects: teams, people and on-call are seeded tables with no login
+  and a user picker in the UI; the load test reports ingest → alert visible and ingest → mock channel
+  separately, with the duplicate ratio stated; Claude receives one truncated sample payload per new schema
+  and runbook text on upload.
+- AC-5.1, AC-5.2 and AC-7.2 are still TBD: the design supports them, the thresholds are not set.
