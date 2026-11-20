@@ -1,0 +1,48 @@
+# Processor with real Kafka, Redis and its own Postgres, for local runs and load tests.
+#   docker compose up -d --build        (from backend/processor)
+#   PROCESSOR_WORKERS=3 docker compose up -d processor
+#   docker compose down -v              (stops everything, deletes the data)
+include:
+  - path: ../kafka/docker-compose.yml
+
+services:
+  redis:
+    image: redis:7.4.11
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  processor-db:
+    image: postgres:17.11
+    environment:
+      POSTGRES_USER: alerts
+      POSTGRES_PASSWORD: alerts
+      POSTGRES_DB: processor
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - processor-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "alerts", "-d", "processor"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  processor:
+    build: .
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://alerts:alerts@processor-db:5432/processor
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PROCESSOR_WORKERS: ${PROCESSOR_WORKERS:-1}
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      processor-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  processor-db-data:
