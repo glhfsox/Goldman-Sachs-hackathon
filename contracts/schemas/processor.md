@@ -7,7 +7,7 @@ Shared rules: [../storage.md](../storage.md).
 
 ### `alerts`: source of truth for alert state
 
-The [Alert object](../api.md) plus five internal columns that never leave the service.
+The [Alert object](../api.md) plus six internal columns that never leave the service.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -25,6 +25,7 @@ The [Alert object](../api.md) plus five internal columns that never leave the se
 | `first_seen`, `last_seen` | timestamptz, not null | Event time (`ts`) of the first and the latest event |
 | `first_received_at` | timestamptz, not null | Ingest time of the first event: start of the latency measurement |
 | `last_received_at` | timestamptz, not null | Internal. Ingest time of the latest event; window arithmetic uses it |
+| `window_s` | int, not null | Internal. The rule's `window_s` when the alert was opened or last reopened by an event; auto-resolve uses it |
 | `runbook_id` | text | |
 | `acked_by`, `resolved_by` | text | User id, or `auto` |
 | `sample_event` | jsonb, not null | Envelope of the first event; a `raw` over 16,384 characters of JSON is replaced by a truncated preview |
@@ -36,6 +37,9 @@ The [Alert object](../api.md) plus five internal columns that never leave the se
 - Index on (`alert_key`, `last_received_at` desc) for the reopen lookup.
 - `status`, `acked_by` and `resolved_by` also change when the processor applies an `acked` or `resolved`
   record that the api published to `alerts.changes`.
+- Auto-resolve: every few seconds the processor sets `status = 'resolved'`, `resolved_by = 'auto'` on
+  live alerts whose `last_received_at` is older than `window_s` plus 5 s and whose counters in Redis have
+  expired, and writes the `resolved` record to `outbox` in the same transaction.
 
 ### `incidents`
 

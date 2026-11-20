@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     sample_event      jsonb NOT NULL,
     opened_by_event   text NOT NULL,          -- internal: event that last opened or reopened the alert
     opened_partition  int NOT NULL,           -- internal: Kafka position of opened_by_event, seeds its watermark
-    opened_offset     bigint NOT NULL
+    opened_offset     bigint NOT NULL,
+    window_s          int NOT NULL            -- internal: the rule's window_s when the alert last opened, for auto-resolve
 );
 
 -- Postgres decides alert existence: at most one non-resolved alert per key.

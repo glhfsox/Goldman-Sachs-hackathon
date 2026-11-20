@@ -26,7 +26,7 @@ RAW_TOPIC, CONFIG_TOPIC = "events.raw", "config.changes"
 MIGRATIONS = Path(__file__).parent.parent / "migrations"
 MIGRATION_LOCK = 0x70726F63  # any constant shared by all replicas
 BATCH = 500
-FLUSH_S, REFRESH_S, LOG_S = 1.0, 2.0, 10.0
+FLUSH_S, RESOLVE_S, REFRESH_S, LOG_S = 1.0, 5.0, 2.0, 10.0
 MAX_DEPTH = 64  # payload nesting; Postgres jsonb fails far deeper, json.loads recurses
 _BAD = re.compile("[\x00\ud800-\udfff]")  # NUL (Postgres refuses it) and lone surrogates (UTF-8 cannot encode them)
 # the store dedups a redelivered or replayed record, so a batch that hit one of these is applied again record by record
@@ -103,12 +103,14 @@ def _commit(consumer, offsets: dict) -> None:
 
 
 class Processor:
-    """One replica's loop. `now` is a monotonic clock in seconds, read only here, for the housekeeping intervals."""
+    """One replica's loop. `now` is a monotonic clock in seconds, read only here, for the housekeeping intervals;
+    `utcnow` is the wall clock (aware UTC datetime) that auto-resolve compares ingest times with."""
 
-    def __init__(self, consumer, config_consumer, config, store, relay, now=time.monotonic):
-        self.consumer, self.config_consumer, self.config, self.store, self.relay, self.now = (
-            consumer, config_consumer, config, store, relay, now)
-        self._flushed = self._refreshed = self._logged = now()
+    def __init__(self, consumer, config_consumer, config, store, relay, now=time.monotonic,
+                 utcnow=lambda: datetime.now(UTC)):
+        self.consumer, self.config_consumer, self.config, self.store, self.relay, self.now, self.utcnow = (
+            consumer, config_consumer, config, store, relay, now, utcnow)
+        self._flushed = self._resolved = self._refreshed = self._logged = now()
         self.events = self.matches = self._logged_events = 0
 
     def step(self, timeout: float = 0.1) -> None:
@@ -156,7 +158,10 @@ class Processor:
         if t - self._flushed >= FLUSH_S:
             self.store.flush()
             self._flushed = t
-        self.relay.drain()  # after the flush, so its threshold and reopen changes leave in this step too
+        if t - self._resolved >= RESOLVE_S:
+            self.store.resolve_quiet(self.utcnow())
+            self._resolved = t
+        self.relay.drain()  # after the flush and auto-resolve, so their changes leave in this step too
         if msgs := self.config_consumer.consume(num_messages=BATCH, timeout=0):
             if records := [d for m in msgs if (d := _decode(m))]:
                 self.config.apply(records)

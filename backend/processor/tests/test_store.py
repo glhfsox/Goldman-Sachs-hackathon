@@ -1,3 +1,4 @@
+import dataclasses
 import threading
 from datetime import UTC, datetime, timedelta
 
@@ -6,7 +7,7 @@ import pytest
 
 from conftest import PAYLOADS, make_event
 from processor import build_envelope, match_rules
-from processor.store import DIRTY, Item, Store
+from processor.store import DIRTY, GRACE_S, Item, Store
 from processor.store import _hash_key as store_hash
 
 T0 = datetime(2026, 11, 20, 10, 15, 2, 123000, tzinfo=UTC)
@@ -377,3 +378,157 @@ def test_reopen_on_miss_path_crossing_a_threshold(new_store, new_redis, batch, s
     store.flush()
     assert sql("SELECT count FROM alerts") == [{"count": 10}]
     assert [c["alert"]["count"] for c in changes(sql, "count_threshold")] == [10]
+
+
+# --- auto-resolve ---
+
+def expire(r, items):
+    """The hash's TTL ran out: no event was processed for this key for window_s."""
+    r.delete(store_hash(items[0].match.alert_key))
+
+
+def windowed(items, window_s):
+    return [dataclasses.replace(it, window_s=window_s) for it in items]
+
+
+def after(seconds):
+    return T0 + timedelta(seconds=seconds)
+
+
+def test_quiet_alert_is_auto_resolved_once(new_store, new_redis, batch, sql):
+    store, items = new_store(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    expire(new_redis(), items)
+    now = after(300 + GRACE_S + 1)
+    assert store.resolve_quiet(now) == 1
+    assert sql("SELECT status, resolved_by FROM alerts") == [{"status": "resolved", "resolved_by": "auto"}]
+    [record] = changes(sql, "resolved")
+    assert (record["actor"], record["at"]) == ("auto", "2026-11-20T10:20:08.123Z")
+    assert (record["alert"]["status"], record["alert"]["resolved_by"], record["alert"]["count"]) == ("resolved", "auto", 3)
+    assert store.resolve_quiet(now) == 0
+    assert len(changes(sql, "resolved")) == 1
+
+
+@pytest.mark.parametrize("quiet_s, resolved", [(300 + GRACE_S - 1, 0), (300 + GRACE_S, 0), (300 + GRACE_S + 1, 1)])
+def test_auto_resolve_cutoff(new_store, new_redis, batch, sql, quiet_s, resolved):
+    store, items = new_store(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    expire(new_redis(), items)
+    assert store.resolve_quiet(after(quiet_s)) == resolved
+    assert len(changes(sql, "resolved")) == resolved
+
+
+def test_alert_still_receiving_a_backlog_is_not_resolved(new_store, batch, sql):
+    store = new_store()
+    store.process(batch("workflow", range(3)))
+    store.flush()
+    assert store.resolve_quiet(after(3600)) == 0  # quiet by ingest time, but its hash is alive
+    assert sql("SELECT status FROM alerts") == [{"status": "open"}]
+
+
+def test_acked_alert_is_auto_resolved(new_store, new_redis, batch, sql):
+    store, items = new_store(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    sql("UPDATE alerts SET status = 'acked', acked_by = 'marek' RETURNING id")
+    expire(new_redis(), items)
+    assert store.resolve_quiet(after(400)) == 1
+    assert sql("SELECT status, acked_by, resolved_by FROM alerts") == [
+        {"status": "resolved", "acked_by": "marek", "resolved_by": "auto"}]
+    [record] = changes(sql, "resolved")
+    assert record["actor"] == "auto" and record["alert"]["status"] == "resolved"
+
+
+def test_each_rule_resolves_after_its_own_window(new_store, new_redis, batch, sql):
+    store, r = new_store(), new_redis()
+    fast, slow = windowed(batch("workflow", range(3)), 60), batch("pricing", range(3))
+    store.process(fast + slow)
+    store.flush()
+    expire(r, fast)
+    expire(r, slow)
+    assert store.resolve_quiet(after(60 + GRACE_S + 1)) == 1
+    assert sql("SELECT rule_id FROM alerts WHERE status = 'resolved'") == [{"rule_id": "settlements-workflow-failed"}]
+    assert store.resolve_quiet(after(300 + GRACE_S + 1)) == 1
+    assert [c["alert"]["rule_id"] for c in changes(sql, "resolved")] == ["settlements-workflow-failed", "pricing-engine-errors"]
+
+
+def test_two_replicas_resolving_at_once_emit_one_record(new_store, new_redis, batch, sql):
+    s0, items = new_store(), batch("workflow", range(3))
+    s0.process(items)
+    s0.flush()
+    expire(new_redis(), items)
+    stores, barrier, done, errors = [new_store(), new_store()], threading.Barrier(2), [], []
+
+    def update_after_both_checked(store):
+        orig = store._exec
+
+        def exec_(fill):
+            out = orig(fill)
+            barrier.wait(5)  # both replicas have their candidates before either updates
+            return out
+        store._exec = exec_
+
+    def run(store):
+        try:
+            done.append(store.resolve_quiet(after(400)))
+        except Exception as e:
+            errors.append(e)
+    for s in stores:
+        update_after_both_checked(s)
+    threads = [threading.Thread(target=run, args=(s,)) for s in stores]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and sorted(done) == [0, 1]
+    assert len(changes(sql, "resolved")) == 1
+
+
+def test_resolve_skips_an_alert_flushed_after_the_candidate_read(new_store, new_redis, batch, sql):
+    store, items = new_store(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    expire(new_redis(), items)
+    orig = store._exec
+
+    def late_event_flushed(fill):  # another replica flushes a late event between the hash check and the update
+        out = orig(fill)
+        sql("UPDATE alerts SET last_received_at = %s, count = 4 RETURNING id", after(399))
+        return out
+    store._exec = late_event_flushed
+    assert store.resolve_quiet(after(400)) == 0
+    assert sql("SELECT status FROM alerts") == [{"status": "open"}]
+
+
+@pytest.mark.parametrize("gap, change", [(400, "reopened"), (600, "opened")])  # inside 2 * window_s, and past it
+def test_event_after_auto_resolve(new_store, new_redis, batch, sql, gap, change):
+    store, items = new_store(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    expire(new_redis(), items)
+    assert store.resolve_quiet(after(306)) == 1
+    store.process(batch("workflow", [3], at=gap))
+    store.flush()
+    rows = sql("SELECT id, status FROM alerts ORDER BY first_received_at")
+    [resolved] = changes(sql, "resolved")
+    if change == "reopened":
+        assert rows == [{"id": resolved["alert"]["id"], "status": "open"}]
+        [reopened] = changes(sql, "reopened")
+        assert reopened["alert"]["id"] == resolved["alert"]["id"]
+    else:
+        assert [r["status"] for r in rows] == ["resolved", "open"] and rows[0]["id"] == resolved["alert"]["id"]
+        assert len(changes(sql, "opened")) == 2 and changes(sql, "reopened") == []
+
+
+def test_window_s_follows_the_rule_on_insert_and_reopen(new_store, new_redis, batch, sql):
+    store = new_store()
+    store.process(windowed(batch("workflow", range(2)), 60))
+    store.flush()
+    assert sql("SELECT window_s FROM alerts") == [{"window_s": 60}]
+    resolve_all(sql)
+    new_redis().flushall()
+    store.process(windowed(batch("workflow", [2], at=100), 120))  # the rule's window changed in between
+    store.flush()
+    assert sql("SELECT status, window_s FROM alerts") == [{"status": "open", "window_s": 120}]

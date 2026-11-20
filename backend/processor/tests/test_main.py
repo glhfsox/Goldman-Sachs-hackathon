@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
@@ -63,6 +64,9 @@ class FakeRelay:
         return 0
 
 
+T0 = datetime(2026, 11, 20, 10, 15, 2, 123000, tzinfo=UTC)  # received_at of make_event
+
+
 class Spy:
     """Records each method call on the wrapped object by name, then forwards it."""
     def __init__(self, obj, name, calls):
@@ -91,16 +95,17 @@ def conns(db):
 
 @pytest.fixture
 def world(conns, sql, new_redis, mappings, rules):
-    """A Processor on the real Store with fake Kafka, config and relay; `w.clock[0]` is the time `now` returns."""
+    """A Processor on the real Store with fake Kafka, config and relay; `w.clock[0]` is the time `now` returns,
+    `w.wall[0]` the one `utcnow` returns."""
     class W:
         pass
     w = W()
-    w.calls, w.clock = [], [0.0]
+    w.calls, w.clock, w.wall = [], [0.0], [T0]
     w.consumer, w.config_consumer = FakeConsumer(w.calls), FakeConsumer(w.calls)
     w.config = FakeConfig(mappings, rules, w.calls)
     w.store = Store(conns(), new_redis())
     w.proc = Processor(w.consumer, w.config_consumer, w.config, Spy(w.store, "store", w.calls),
-                       FakeRelay(w.calls), now=lambda: w.clock[0])
+                       FakeRelay(w.calls), now=lambda: w.clock[0], utcnow=lambda: w.wall[0])
     return w
 
 
@@ -209,6 +214,22 @@ def test_housekeeping_follows_the_injected_clock(world, caplog):
     assert line == "events=20 matches=20 events_per_s=2.0"
 
 
+def test_auto_resolve_runs_every_5_s_with_the_wall_clock_before_the_drain(world, monkeypatch):
+    seen = []
+    monkeypatch.setattr(world.store, "resolve_quiet", lambda now: seen.append(now) or 0)
+    world.clock[0] = 4.9
+    world.proc.step()
+    assert seen == []
+    world.clock[0], world.wall[0] = 5.0, T0 + timedelta(seconds=999)
+    world.proc.step()
+    assert seen == [T0 + timedelta(seconds=999)]
+    i = world.calls.index("store.resolve_quiet")
+    assert world.calls[i + 1] == "relay.drain"
+    world.clock[0] = 9.9
+    world.proc.step()
+    assert len(seen) == 1
+
+
 def test_empty_batch_still_runs_housekeeping_and_drains(world):
     world.clock[0] = 2.0
     world.proc.step()
@@ -237,9 +258,9 @@ def test_end_to_end_with_real_config_and_relay(conns, sql, new_redis):
     calls, producer, r = [], FakeProducer(), new_redis()
     consumer, config_consumer = FakeConsumer(calls), FakeConsumer(calls)
     config_consumer.queue = [Msg(rec, i, topic="config.changes") for i, rec in enumerate(records)]
-    clock = [0.0]
+    clock, wall = [0.0], [T0]
     proc = Processor(consumer, config_consumer, Config(conns()), Store(conns(), r), Relay(conns(), producer, r),
-                     now=lambda: clock[0])
+                     now=lambda: clock[0], utcnow=lambda: wall[0])
     proc.step()  # applies the records
     clock[0] = 2.0
     proc.step()  # refreshes: the processor now has the mapping and the rule
@@ -248,6 +269,11 @@ def test_end_to_end_with_real_config_and_relay(conns, sql, new_redis):
     [(topic, key, change)] = producer.sent
     assert (topic, change["change"], change["alert"]["rule_id"]) == ("alerts.changes", "opened", "settlements-workflow-failed")
     assert key == change["alert"]["id"] and sql("SELECT * FROM outbox") == []
+    r.delete(*r.keys("proc:a:*"))  # window_s passed without an event: the hash expired
+    clock[0], wall[0] = 5.0, T0 + timedelta(seconds=306)
+    proc.step()
+    [(topic, key, resolved)] = producer.sent[1:]
+    assert (topic, key, resolved["change"], resolved["actor"]) == ("alerts.changes", change["alert"]["id"], "resolved", "auto")
 
 
 # --- records on events.raw that must not stop the loop ---

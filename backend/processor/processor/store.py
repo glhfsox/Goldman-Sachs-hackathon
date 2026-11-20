@@ -26,6 +26,7 @@ THRESHOLDS = (1000, 100, 10)  # highest first: one count_threshold per flush
 # Caps on what an alert row stores and every change record ships; rules still see the full payload.
 TITLE_MAX, BODY_MAX, FIELD_MAX, RAW_MAX, PREVIEW_MAX = 300, 2000, 500, 16384, 2000
 MISS, RAISED = 0, 3
+GRACE_S = 5  # auto-resolve waits this long past window_s: covers the lag of the once-per-second flush
 
 # KEYS: alert hash, DIRTY. ARGV: partition, offset, last_seen ms, received ms, severity rank, ttl s, alert key.
 _HIT = """
@@ -224,22 +225,22 @@ class Store:
                             "UPDATE alerts SET status = 'open', acked_by = NULL, resolved_by = NULL, count = count + 1,"
                             " severity = %s, last_seen = GREATEST(last_seen, %s),"
                             " last_received_at = GREATEST(last_received_at, %s), opened_by_event = %s,"
-                            " opened_partition = %s, opened_offset = %s WHERE id = %s RETURNING *",
+                            " opened_partition = %s, opened_offset = %s, window_s = %s WHERE id = %s RETURNING *",
                             (max(old["severity"], env["severity"], key=SEV_RANK.get), env["ts"], received,
-                             env["event_id"], it.partition, it.offset, old["id"]))
+                             env["event_id"], it.partition, it.offset, it.window_s, old["id"]))
                     else:
                         change = "opened"
                         cur.execute(
                             "INSERT INTO alerts (id, alert_key, rule_id, team_id, status, severity, title, body, fields,"
                             " color, count, first_seen, last_seen, first_received_at, last_received_at, runbook_id,"
-                            " sample_event, opened_by_event, opened_partition, opened_offset)"
-                            " VALUES (%s, %s, %s, %s, 'open', %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            " sample_event, opened_by_event, opened_partition, opened_offset, window_s)"
+                            " VALUES (%s, %s, %s, %s, 'open', %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                             " RETURNING *",
                             (str(uuid.uuid4()), m.alert_key, m.rule_id, m.team_id, env["severity"],
                              _cut(m.title, TITLE_MAX), _cut(m.body, BODY_MAX),
                              Jsonb({k: _capped_field(v) for k, v in m.fields.items()}), m.color, env["ts"], env["ts"],
                              received, received, it.runbook_id, Jsonb({**env, "raw": _capped_raw(env["raw"])}),
-                             env["event_id"], it.partition, it.offset))
+                             env["event_id"], it.partition, it.offset, it.window_s))
                     row = cur.fetchone()
                     self._change(cur, row, change, received)
                     if row["count"] in THRESHOLDS:  # a reopen adds 1, so it crosses a threshold only by landing on it
@@ -250,9 +251,9 @@ class Store:
         raise RuntimeError(f"could not open an alert for {m.alert_key}")
 
     @staticmethod
-    def _change(cur, row: dict, change: str, at: datetime) -> None:
+    def _change(cur, row: dict, change: str, at: datetime, actor: str = "processor") -> None:
         """Outbox change record (events.md §4); the API builds the timeline from these."""
-        record = {"change_id": str(uuid.uuid4()), "change": change, "at": _iso(at), "actor": "processor",
+        record = {"change_id": str(uuid.uuid4()), "change": change, "at": _iso(at), "actor": actor,
                   "alert": alert_object(row)}
         cur.execute("INSERT INTO outbox (topic, key, payload) VALUES (%s, %s, %s)", (TOPIC, row["id"], Jsonb(record)))
 
@@ -316,6 +317,32 @@ class Store:
                 else:
                     pipe.evalsha(self._sha["undirty"], 1, DIRTY, k, h["count"])
         self._exec(fill)
+
+    # --- auto-resolve ---
+
+    def resolve_quiet(self, now: datetime) -> int:
+        """Resolve alerts with no event for their rule's window_s (rules.md §4); return how many. Call every few seconds."""
+        quiet = {"now": now, "grace": GRACE_S}
+        cond = "status <> 'resolved' AND last_received_at < %(now)s - make_interval(secs => window_s + %(grace)s)"
+        rows = self.pg.execute(f"SELECT id, alert_key FROM alerts WHERE {cond}", quiet).fetchall()
+        if not rows:
+            return 0
+        # last_received_at is ingest time, so a backlog looks quiet by it; the hash TTL counts real time since the last processed event
+        alive = self._exec(lambda pipe: [pipe.exists(_hash_key(key)) for _, key in rows])
+        ids = [row_id for (row_id, _), a in zip(rows, alive) if not a]
+        if not ids:
+            return 0
+        # shortcut: an event between the hash check and this update leaves the alert resolved with a fresh hash; the flush-path reopen undoes it on the next flush
+        with self.pg.transaction(), self.pg.cursor(row_factory=dict_row) as cur:
+            # the lock re-checks cond, so two replicas resolve once and a flush in between keeps the alert; id order as in flush
+            cur.execute(
+                f"WITH q AS (SELECT id FROM alerts WHERE id = ANY(%(ids)s) AND {cond} ORDER BY id FOR UPDATE)"
+                " UPDATE alerts SET status = 'resolved', resolved_by = 'auto' FROM q WHERE alerts.id = q.id RETURNING alerts.*",
+                {**quiet, "ids": ids})
+            resolved = cur.fetchall()
+            for row in resolved:
+                self._change(cur, row, "resolved", now, actor="auto")
+        return len(resolved)
 
     # --- unmapped schemas ---
 
