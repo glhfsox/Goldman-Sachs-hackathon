@@ -33,6 +33,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: true  # print the API error when a run fails; GitHub masks secrets
           prompt: "PR #${{ env.PR }} in ${{ github.repository }}, head SHA ${{ env.SHA }}. Decide and act."
           # merge and comment are allowed only for this PR, and merge only at this exact head (--merge is for release PRs dev -> main)
           claude_args: >-
