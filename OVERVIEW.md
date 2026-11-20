@@ -170,6 +170,13 @@ flowchart TB
   n_sources(["<b>sources</b><br/><small>external</small>"])
   n_channels(["<b>channels</b><br/><small>external</small>"])
   n_claude_api(["<b>claude_api</b><br/><small>external</small>"])
+  subgraph a_infra ["infra"]
+    n_source_kafka("<b>source_kafka</b><br/><small>topic</small>")
+    n_events_raw("<b>events_raw</b><br/><small>topic</small>")
+    n_alerts_changes("<b>alerts_changes</b><br/><small>topic</small>")
+    n_redis[("<b>redis</b><br/><small>store</small>")]
+    n_postgres[("<b>postgres</b><br/><small>store</small>")]
+  end
   subgraph a_backend ["backend"]
     n_ingest("<b>ingest</b><br/><small>service</small>")
     n_processor("<b>processor</b><br/><small>service</small>")
@@ -177,16 +184,12 @@ flowchart TB
     n_api("<b>api</b><br/><small>service</small>")
     n_ai_worker("<b>ai_worker</b><br/><small>service</small>")
   end
-  subgraph a_infra ["infra"]
-    n_events_raw("<b>events_raw</b><br/><small>topic</small>")
-    n_alerts_changes("<b>alerts_changes</b><br/><small>topic</small>")
-    n_redis[("<b>redis</b><br/><small>store</small>")]
-    n_postgres[("<b>postgres</b><br/><small>store</small>")]
-  end
   subgraph a_frontend ["frontend"]
     n_web_ui("<b>web_ui</b><br/><small>ui</small>")
   end
-  n_sources -- "raw payload" --> n_ingest
+  n_sources -- "HTTP webhooks" --> n_ingest
+  n_sources -- "source.* messages" --> n_source_kafka
+  n_source_kafka -- "source.* messages" --> n_ingest
   n_ingest -- "raw event" --> n_events_raw
   n_events_raw -- "raw event" --> n_processor
   n_postgres -- "rules, mappings" --> n_processor
@@ -210,9 +213,9 @@ flowchart TB
   classDef k0 fill:#dbeafe,stroke:#2563eb,color:#111827
   class n_sources,n_channels,n_claude_api k0
   classDef k1 fill:#dcfce7,stroke:#16a34a,color:#111827
-  class n_ingest,n_processor,n_notifier,n_api,n_ai_worker k1
+  class n_source_kafka,n_events_raw,n_alerts_changes k1
   classDef k2 fill:#fef3c7,stroke:#d97706,color:#111827
-  class n_events_raw,n_alerts_changes k2
+  class n_ingest,n_processor,n_notifier,n_api,n_ai_worker k2
   classDef k3 fill:#fce7f3,stroke:#db2777,color:#111827
   class n_redis,n_postgres k3
   classDef k4 fill:#ede9fe,stroke:#7c3aed,color:#111827
@@ -220,7 +223,7 @@ flowchart TB
 ```
 <!-- /arch:diagram -->
 
-Events run Sources → Ingest → `events.raw` → Processor → `alerts.changes` → Notifier → channels.
+Events run Sources (webhooks or the sources Kafka cluster) → Ingest → `events.raw` → Processor → `alerts.changes` → Notifier → channels.
 The API, UI and AI worker reach the event path only through the stores.
 
 ### Services
@@ -229,14 +232,14 @@ Every service is stateless; all state sits in Kafka, Redis or Postgres, so each 
 
 | Service | Does | State it uses | Scales by |
 |---|---|---|---|
-| Ingest (`backend/ingest`) | Source adapters (HTTP webhook, Kafka `source.*` topics on the same cluster). Stamps `event_id`, `source_id`, `received_at` and writes the raw payload to `events.raw`. No other logic. | Source configs (Postgres) | Replicas behind a load balancer |
+| Ingest (`backend/ingest`) | Source adapters (HTTP webhook, Kafka `source.*` topics on a separate sources cluster). Stamps `event_id`, `source_id`, `received_at` and writes the raw payload to `events.raw`. No other logic. | Source configs (Postgres) | Replicas behind a load balancer |
 | Processor (`backend/processor`) | Applies the stored schema mapping, or marks the event unmapped. Evaluates rules. Deduplicates and groups per rule. Links related alerts into incidents. Writes alert state and publishes state changes to `alerts.changes`. | Mappings and rules (Postgres, cached in memory), windows and counters (Redis), alerts and incidents (Postgres) | Kafka partitions of `events.raw` |
 | Notifier (`backend/notifier`) | Policy: who is told, when, on which channel, in one message or a digest. Writes notification rows with a send time. Workers send through channel adapters with retry, backoff and a fallback channel. A scheduler loop runs escalation steps, digests and auto-resolve. | Notification outbox, preferences, on-call (Postgres) | Workers claiming rows with `SKIP LOCKED` |
 | API (`backend/api`) | REST and WebSocket for the UI: live feed, ack and resolve, rules, mappings, preferences, runbooks, approvals, improvement proposals. Hosts the runbook module: lookup, placeholder fill, and the action runner with its approval gate. | Everything in Postgres; pushes via Redis pub/sub | Replicas; any replica can push to any browser |
 | AI worker (`backend/ai-worker`) | Off the event path. Proposes a mapping for a new schema, converts an uploaded runbook to the canonical form, and drafts runbook updates from action logs. | Pending schema samples and runbook drafts (Postgres) | One or two workers with a concurrency cap |
 
-Shared infrastructure: one Kafka cluster with two internal topics (`events.raw`, `alerts.changes`), Redis,
-Postgres. Mocks: MailHog for email, a logging gateway for SMS and calls, and a small target service that
+Shared infrastructure: an internal Kafka cluster with two topics (`events.raw`, `alerts.changes`), a
+separate sources Kafka cluster that third-party systems publish to and only Ingest reads, Redis, Postgres. Mocks: MailHog for email, a logging gateway for SMS and calls, and a small target service that
 runbook actions call.
 
 ### How one event flows
@@ -265,7 +268,7 @@ Latency is measured from `received_at` in step 1 to the send timestamp the mock 
 
 ### What changed from the first proposal
 
-Seven services and five Kafka topics became five services and two topics. The last column names what
+Seven services and five Kafka topics became five services and two internal topics. The last column names what
 each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-criteria.md)).
 
 | Area | Proposed | Final | Needed for |
@@ -303,7 +306,8 @@ each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-cr
 
 ### Decisions on defaults (confirmed 20-11)
 
-- Second source type: `source.*` topics on the same Kafka cluster.
+- Second source type: `source.*` topics on a separate Kafka cluster for third-party systems; Ingest is the
+  only bridge to the internal cluster (changed later on 20-11, was: same cluster).
 - New schema: a Claude-proposed mapping is applied automatically once it validates on the stored sample.
 - Unmapped events: only events arriving after the mapping is active use it; no replay.
 - Rule language: a JSON tree of `{all / any: [{field, op, value}]}`, shared by rules, mapping `match` and

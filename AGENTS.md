@@ -15,6 +15,7 @@ Everything in the repo is in English: code, comments, docs, `STATE.md` and `HAND
 | `ai/` | glhfsox | models, prompts, inference, eval |
 | `data/` | glhfsox, spdsslg | collection, cleaning, datasets, features |
 | `backend/` | SviatoslavShpylovyi, oshuptar | API, DB, integrations |
+| `backend/ai-worker/` | glhfsox | AI worker service (schema mappings, runbook conversion) |
 | `frontend/` | everyone | UI |
 | `presentation/` | oshuptar | slides, demo materials |
 | `contracts/ai/`, `contracts/data/`, `contracts/backend/` | owner of that zone | interfaces the zone provides; files directly in `contracts/` are shared |
@@ -31,9 +32,9 @@ The exact path → owner mapping lives in `.github/CODEOWNERS`. Both GitHub and 
 ## Contracts (`contracts/`)
 Everything where zones touch: API endpoints, dataset formats, model input/output, env vars and service ports. Any format works (OpenAPI, JSON Schema, pydantic, markdown), but always include an example request/response or record.
 - A contract lives in the folder of the zone that implements it: `contracts/ai/`, `contracts/data/`, `contracts/backend/`. That zone's owner owns the folder (CODEOWNERS); consumers review. Files directly in `contracts/` (e.g. service ports) are shared by everyone.
-- A consumer needs a change? Only on your operator's explicit request, open a PR that edits the provider's contract; the hook asks the human to confirm, and the bot merges only after the provider approves. Don't touch the provider's code.
+- A consumer needs a change? Only on your operator's explicit request, open a PR that edits the provider's contract and mention the provider in it; the hook asks the human to confirm. Don't touch the provider's code.
 - Changed a contract? Add an entry to your section of `STATE.md` in the same PR (the gate enforces this).
-- Breaking change (removed or renamed field or endpoint, changed type or meaning, new required field): your operator agrees it with the consumers first; the bot merges only after a consumer approves (a teammate other than the author who doesn't own that contract; for files directly in `contracts/`, any teammate other than the author).
+- Breaking change (removed or renamed field or endpoint, changed type or meaning, new required field): your operator agrees it with the consumers first and mentions them in the PR. No approval is required to merge.
 
 ## STATE.md: shared board of cross-zone changes
 Only what another teammate's agent needs to know so their code doesn't break, or so they can use yours.
@@ -66,7 +67,7 @@ Lives at the repo root, one per person, never committed. The agent maintains it.
 ## Git and PRs
 - Two long-lived branches: `dev` (integration; features land here) and `main` (production; changes only through a release PR `dev` → `main`, which the bot merges with a merge commit; the repo owner tags it `vX.Y`).
 - Branch `<login>/<short-name>` from a fresh `dev`, PR back into `dev` with `gh pr create -B dev` (the GitHub default branch is `main`, so without `-B` the PR would go there; the hook blocks that). Small PRs that live hours, not days. Squash-merge. No direct pushes to `dev` or `main`.
-- The `pr-merger` bot (`.claude/agents/pr-merger.md`, run by `.github/workflows/auto-merge.yml`) merges PRs automatically once `gate` is green and the zone rules hold. Touched another zone? Its owner approves the PR, then the bot merges. To keep a PR open, make it a draft or add the label `no-automerge`.
+- The `pr-merger` bot (`.claude/agents/pr-merger.md`, run by `.github/workflows/auto-merge.yml`) merges PRs automatically once `gate` is green; no approvals are required. Touched another zone? Mention its owner in the PR. To keep a PR open, make it a draft or add the label `no-automerge`.
 - Before opening a PR, run `python3 scripts/team.py pr`. It's the same gate CI runs: checks of changed zones plus the "contract → STATE.md" rule. The Claude hook runs it automatically before `gh pr create`.
 - The PR description is the filled-in `.github/pull_request_template.md`, passed with `gh pr create --body` or `--body-file`. In non-interactive mode gh ignores the template, so the Claude hook rejects `--fill` and bodies without the template's sections.
 - Never commit secrets or `.env` (keep a `.env.example` in the zone), raw data or model weights.

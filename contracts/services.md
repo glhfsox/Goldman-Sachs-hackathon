@@ -9,11 +9,11 @@ The stack of each service is its owners' choice; the interfaces here are JSON sh
 
 | Service | Code | Port | Consumes | Produces |
 |---|---|---|---|---|
-| ingest | `backend/ingest/` | 8001 (HTTP) | HTTP webhooks, Kafka `source.*`; Postgres `sources` | Kafka `events.raw` |
+| ingest | `backend/ingest/` | 8001 (HTTP) | HTTP webhooks; `source.*` topics on the sources Kafka cluster; Postgres `sources` | Kafka `events.raw` |
 | processor | `backend/processor/` | none | Kafka `events.raw`; Postgres `mappings`, `rules`, `service_deps` | Postgres `alerts`, `incidents`, `alert_events`, `schema_samples`; Kafka `alerts.changes`; Redis `ui.alerts` |
 | notifier | `backend/notifier/` | none | Kafka `alerts.changes`; Postgres `rules`, `memberships`, `preferences` | Postgres `notifications`, `alert_events`, `alerts` (auto-resolve); channel adapters |
 | api | `backend/api/` | 8000 (HTTP + WebSocket) | Postgres (all tables); Redis `ui.alerts` | Postgres (config, ack/resolve, action runs, proposals); Kafka `alerts.changes` |
-| ai-worker | `backend/ai-worker/` | none | Postgres `schema_samples`, `runbooks` (drafts); Claude API | Postgres `mappings`, `runbooks` |
+| ai-worker (owner: glhfsox) | `backend/ai-worker/` | none | Postgres `schema_samples`, `runbooks` (drafts); Claude API | Postgres `mappings`, `runbooks` |
 | UI | `frontend/` | 3000 | API on 8000 | none |
 
 Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](storage.md),
@@ -23,7 +23,8 @@ Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](st
 
 | Name | Port | Purpose |
 |---|---|---|
-| `kafka` | 9092 | One cluster for everything, including the `source.*` topics |
+| `kafka` | 9092 | Internal cluster: `events.raw`, `alerts.changes`. Only our services connect to it |
+| `kafka-sources` | 9094 on the host, `kafka-sources:9092` inside compose | Separate cluster that third-party systems publish to (`source.*` topics). Only ingest reads it |
 | `redis` | 6379 | Dedup windows and counters (processor only), pub/sub channel `ui.alerts` |
 | `postgres` | 5432 | All durable state, see [storage.md](storage.md) |
 | `mailhog` | 1025 SMTP, 8025 web | Mock email |
@@ -32,11 +33,13 @@ Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](st
 
 ## Kafka topics
 
-| Topic | Key | Producers | Consumers (group) |
-|---|---|---|---|
-| `source.*` (e.g. `source.workflows`, `source.trades`) | any | external systems, demo scripts | ingest (`ingest`) |
-| `events.raw` | `source_id` | ingest | processor (`processor`) |
-| `alerts.changes` | `alert_id` | processor, api, notifier | notifier (`notifier`) |
+| Topic | Cluster | Key | Producers | Consumers (group) |
+|---|---|---|---|---|
+| `source.*` (e.g. `source.workflows`, `source.trades`) | `kafka-sources` | any | third-party systems, demo scripts | ingest (`ingest`) |
+| `events.raw` | `kafka` | `source_id` | ingest | processor (`processor`) |
+| `alerts.changes` | `kafka` | `alert_id` | processor, api, notifier | notifier (`notifier`) |
+
+Ingest is the only bridge between the two clusters: third-party systems never get access to the internal one.
 
 Delivery is at-least-once everywhere: commit a Kafka offset only after the resulting write is
 durable, and make every write idempotent (`event_id`, `change_id`, notification `id`).
@@ -45,7 +48,8 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 
 | Var | Used by | Example |
 |---|---|---|
-| `KAFKA_BROKERS` | ingest, processor, notifier, api | `kafka:9092` |
+| `KAFKA_BROKERS` | ingest, processor, notifier, api | `kafka:9092` (internal cluster) |
+| `SOURCE_KAFKA_BROKERS` | ingest | `kafka-sources:9092` (sources cluster) |
 | `DATABASE_URL` | all backend services | `postgres://alerts:alerts@postgres:5432/alerts` |
 | `REDIS_URL` | processor, notifier, api | `redis://redis:6379/0` |
 | `SMTP_HOST`, `SMTP_PORT` | notifier | `mailhog`, `1025` |
