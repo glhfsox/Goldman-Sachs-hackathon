@@ -36,6 +36,13 @@ Everything where zones touch: API endpoints, dataset formats, model input/output
 - Changed a contract? Add an entry to your section of `STATE.md` in the same PR (the gate enforces this).
 - Breaking change (removed or renamed field or endpoint, changed type or meaning, new required field): your operator agrees it with the consumers first and mentions them in the PR. No approval is required to merge.
 
+## Kafka events (`contracts/events.md`)
+All backend services share one Kafka cluster ([contracts/services.md](contracts/services.md)). Records are an interface between zones, so they are documented like any contract.
+- Producing events to a topic? Document the record in `contracts/events.md`: topic, key, fields with types, and an example. Do this in the same PR that first produces it.
+- Consuming events from another service? Read that record's schema in `contracts/events.md` first, and map its fields to yours explicitly. Never guess a field.
+- Changing a record (field added, removed, renamed, type or meaning changed)? Update `contracts/events.md` in the same PR. The code is the source of truth: the docs must match it, never the other way round.
+- Breaking record changes follow the rules in "Contracts" above.
+
 ## Database schemas (`contracts/schemas/`)
 Every service has its own Postgres and is the only one that connects to it; the Kafka cluster is shared. `contracts/schemas/<service>.md` describes that service's tables: columns, types, keys, and for a copied table where the data comes from. Overview and shared rules: `contracts/storage.md`.
 - Two services exchange data (a Kafka record, a REST call, a table one of them copies)? Read both services' schema files before writing code, and map the fields from one to the other explicitly. The same thing can have a different name, type or nullability on each side; never assume the other side's columns.
