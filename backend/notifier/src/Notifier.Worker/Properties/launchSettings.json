@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Notifier.Worker": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development",
+        "DATABASE_URL": "postgres://alerts:alerts@localhost:5435/notifier",
+        "KAFKA_BROKERS": "localhost:9092",
+        "SMTP_HOST": "localhost",
+        "SMTP_PORT": "1025",
+        "SMS_GATEWAY_URL": "http://localhost:8002/sms",
+        "CALL_GATEWAY_URL": "http://localhost:8002/call",
+        "PUBLIC_BASE_URL": "http://localhost:3000"
+      }
+    }
+  }
+}
