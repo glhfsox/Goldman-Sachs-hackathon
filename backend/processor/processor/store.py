@@ -344,6 +344,31 @@ class Store:
                 self._change(cur, row, "resolved", now, actor="auto")
         return len(resolved)
 
+    # --- acks and resolves made by people ---
+
+    def apply_changes(self, records) -> int:
+        """Apply `acked` / `resolved` records a person made through the api (events.md §4); return how many alerts changed.
+        No outbox row and no ui.alerts message: the api already published the change, republishing it would loop."""
+        # shortcut: idempotent by alert status, not change_id: a record redelivered or replayed after the alert reopened applies again, keep applied change_ids if that bites
+        changed = 0
+        for rec in records:
+            alert_id, actor = rec["alert"]["id"], rec["actor"]
+            if rec["change"] == "acked":  # counting goes on; acked_by stays until a reopen clears it
+                changed += self.pg.execute("UPDATE alerts SET status = 'acked', acked_by = %s WHERE id = %s AND status = 'open'",
+                                           (actor, alert_id)).rowcount
+                continue
+            if (row := self.pg.execute("SELECT alert_key FROM alerts WHERE id = %s AND status <> 'resolved'",
+                                       (alert_id,)).fetchone()) is None:
+                continue  # unknown, or already resolved
+            key = row[0]
+            self.flush([key])  # counts of events before the resolve land on this alert, not on a reopen
+            changed += self.pg.execute("UPDATE alerts SET status = 'resolved', resolved_by = %s WHERE id = %s AND status <> 'resolved'",
+                                       (actor, alert_id)).rowcount
+            # shortcut: events counted in Redis between that flush and this drop are lost from the count (milliseconds), read-and-delete the hash atomically if exact counts matter
+            # the next event for the key takes the miss path: reopens this alert inside 2 * window_s, opens a new one after
+            self._exec(lambda pipe: pipe.evalsha(self._sha["drop"], 2, _hash_key(key), DIRTY, key, alert_id))
+        return changed
+
     # --- unmapped schemas ---
 
     def save_samples(self, envelopes) -> None:

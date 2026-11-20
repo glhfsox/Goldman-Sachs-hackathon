@@ -522,6 +522,61 @@ def test_event_after_auto_resolve(new_store, new_redis, batch, sql, gap, change)
         assert len(changes(sql, "opened")) == 2 and changes(sql, "reopened") == []
 
 
+# --- acks and resolves made by people ---
+
+def by(kind, actor, alert_id):
+    return {"change_id": f"c-{kind}", "change": kind, "at": "2026-11-20T10:16:00.000Z", "actor": actor, "alert": {"id": alert_id}}
+
+
+def test_ack_is_applied_once_and_the_alert_still_counts_and_auto_resolves(new_store, new_redis, batch, sql):
+    store, items = new_store(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    [alert] = sql("SELECT id FROM alerts")
+    assert store.apply_changes([by("acked", "marek", alert["id"])]) == 1
+    assert store.apply_changes([by("acked", "anna", alert["id"])]) == 0
+    store.process(batch("workflow", range(3, 5)))
+    store.flush()
+    assert sql("SELECT status, acked_by, count FROM alerts") == [{"status": "acked", "acked_by": "marek", "count": 5}]
+    assert [c["change"] for c in changes(sql)] == ["opened"]
+    expire(new_redis(), items)
+    assert store.resolve_quiet(after(400)) == 1
+    assert sql("SELECT status, resolved_by FROM alerts") == [{"status": "resolved", "resolved_by": "auto"}]
+
+
+def test_resolve_flushes_pending_counts_and_drops_the_hash(new_store, new_redis, batch, sql):
+    store, r, items = new_store(), new_redis(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    store.process(batch("workflow", range(3, 5)))  # counted in Redis, not flushed yet
+    [alert] = sql("SELECT id FROM alerts")
+    assert store.apply_changes([by("resolved", "marek", alert["id"])]) == 1
+    assert sql("SELECT status, resolved_by, count FROM alerts") == [{"status": "resolved", "resolved_by": "marek", "count": 5}]
+    assert not r.exists(store_hash(items[0].match.alert_key)) and r.zrange(DIRTY, 0, -1) == []
+    assert [c["change"] for c in changes(sql)] == ["opened"]
+    assert store.apply_changes([by("resolved", "anna", alert["id"]), by("acked", "anna", alert["id"]),
+                                by("resolved", "anna", "no-such-alert")]) == 0
+    assert sql("SELECT resolved_by FROM alerts") == [{"resolved_by": "marek"}]
+
+
+@pytest.mark.parametrize("gap", [100, 600])  # inside 2 * window_s of the last event, and at it
+def test_event_after_a_manual_resolve(new_store, batch, sql, gap):
+    store = new_store()
+    store.process(batch("workflow", range(3)))
+    store.flush()
+    [alert] = sql("SELECT id FROM alerts")
+    store.apply_changes([by("resolved", "marek", alert["id"])])
+    store.process(batch("workflow", [3], at=gap))
+    store.flush()
+    rows = sql("SELECT id, status, count FROM alerts ORDER BY first_received_at")
+    if gap == 100:
+        assert rows == [{"id": alert["id"], "status": "open", "count": 4}]
+        assert [c["change"] for c in changes(sql)] == ["opened", "reopened"]
+    else:
+        assert [(r["id"] == alert["id"], r["status"], r["count"]) for r in rows] == [(True, "resolved", 3), (False, "open", 1)]
+        assert [c["change"] for c in changes(sql)] == ["opened", "opened"]
+
+
 def test_window_s_follows_the_rule_on_insert_and_reopen(new_store, new_redis, batch, sql):
     store = new_store()
     store.process(windowed(batch("workflow", range(2)), 60))

@@ -101,10 +101,10 @@ def world(conns, sql, new_redis, mappings, rules):
         pass
     w = W()
     w.calls, w.clock, w.wall = [], [0.0], [T0]
-    w.consumer, w.config_consumer = FakeConsumer(w.calls), FakeConsumer(w.calls)
+    w.consumer, w.config_consumer, w.changes_consumer = FakeConsumer(w.calls), FakeConsumer(w.calls), FakeConsumer(w.calls)
     w.config = FakeConfig(mappings, rules, w.calls)
     w.store = Store(conns(), new_redis())
-    w.proc = Processor(w.consumer, w.config_consumer, w.config, Spy(w.store, "store", w.calls),
+    w.proc = Processor(w.consumer, w.config_consumer, w.changes_consumer, w.config, Spy(w.store, "store", w.calls),
                        FakeRelay(w.calls), now=lambda: w.clock[0], utcnow=lambda: w.wall[0])
     return w
 
@@ -259,7 +259,7 @@ def test_end_to_end_with_real_config_and_relay(conns, sql, new_redis):
     consumer, config_consumer = FakeConsumer(calls), FakeConsumer(calls)
     config_consumer.queue = [Msg(rec, i, topic="config.changes") for i, rec in enumerate(records)]
     clock, wall = [0.0], [T0]
-    proc = Processor(consumer, config_consumer, Config(conns()), Store(conns(), r), Relay(conns(), producer, r),
+    proc = Processor(consumer, config_consumer, FakeConsumer(calls), Config(conns()), Store(conns(), r), Relay(conns(), producer, r),
                      now=lambda: clock[0], utcnow=lambda: wall[0])
     proc.step()  # applies the records
     clock[0] = 2.0
@@ -410,6 +410,35 @@ def test_config_records_are_committed_after_apply(world):
     assert world.config_consumer.commits[-1] == [("config.changes", 0, 6)]
 
 
+def change(kind, actor, alert_id):
+    return {"change_id": f"c-{kind}-{actor}", "change": kind, "at": "2026-11-20T10:16:00.000Z", "actor": actor,
+            "alert": {"id": alert_id}}
+
+
+def test_acks_and_resolves_by_people_are_applied_and_committed(world, sql, caplog):
+    world.consumer.queue = [Msg(event("workflow", 0), 0)]
+    world.proc.step()
+    [alert] = sql("SELECT id FROM alerts")
+    ignored = [change("opened", "processor", alert["id"]), change("resolved", "auto", alert["id"]),
+               change("severity_raised", "marek", alert["id"]), b"{bad", change("acked", None, alert["id"]),
+               {**change("resolved", "marek", alert["id"]), "alert": "x"}]
+    world.changes_consumer.queue = [Msg(r, i, topic="alerts.changes") for i, r in enumerate(ignored)]
+    with caplog.at_level(logging.WARNING, logger="processor"):
+        world.proc.step()
+    assert len([r for r in caplog.records if r.name == "processor"]) == 3  # bad JSON, no actor, no alert.id
+    assert "store.apply_changes" not in world.calls
+    assert world.changes_consumer.commits == [[("alerts.changes", 0, 6)]]
+    assert sql("SELECT status FROM alerts") == [{"status": "open"}]
+    world.changes_consumer.queue = [Msg(change("acked", "marek", alert["id"]), 6, topic="alerts.changes"),
+                                    Msg(change("resolved", "anna", alert["id"]), 7, topic="alerts.changes")]
+    world.proc.step()
+    assert world.calls[-3:] == ["store.apply_changes", "commit", "relay.drain"]
+    assert world.changes_consumer.commits[-1] == [("alerts.changes", 0, 8)]
+    assert sql("SELECT status, acked_by, resolved_by FROM alerts") == [
+        {"status": "resolved", "acked_by": "marek", "resolved_by": "anna"}]
+    assert [c["change"] for c in changes(sql)] == ["opened"]
+
+
 def rebalance(code):
     from confluent_kafka import KafkaError, KafkaException
     return KafkaException(KafkaError(code))
@@ -487,6 +516,8 @@ def test_kafka_clients_are_configured_for_safe_commits_and_delivery(main_env):
     [producer] = [s.conf for s in KafkaStub.made if not hasattr(s, "topics")]
     assert consumers["events.raw"]["enable.auto.commit"] is False
     assert consumers["config.changes"]["enable.auto.commit"] is False
+    assert {k: consumers["alerts.changes"][k] for k in ("group.id", "enable.auto.commit", "auto.offset.reset")} == {
+        "group.id": "processor-changes", "enable.auto.commit": False, "auto.offset.reset": "earliest"}
     # every message of a drain gets its final delivery callback within that drain's flush
     assert producer["message.timeout.ms"] < FLUSH_TIMEOUT_S * 1000 and producer["enable.idempotence"] is True
 

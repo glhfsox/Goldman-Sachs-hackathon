@@ -19,10 +19,12 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, Topi
 from .config import Config
 from .core import TS_MAX, TS_MIN, build_envelope, match_rules
 from .relay import MESSAGE_TIMEOUT_MS, Relay
+from .store import TOPIC as CHANGES_TOPIC
 from .store import Item, Store
 
 log = logging.getLogger("processor")
 RAW_TOPIC, CONFIG_TOPIC = "events.raw", "config.changes"
+USER_CHANGES, OWN_ACTORS = ("acked", "resolved"), ("processor", "auto")
 MIGRATIONS = Path(__file__).parent.parent / "migrations"
 MIGRATION_LOCK = 0x70726F63  # any constant shared by all replicas
 BATCH = 500
@@ -93,6 +95,18 @@ def _repaired(e: dict) -> dict | None:
         return None
 
 
+def _user_change(msg, d: dict) -> bool:
+    """events.md §4: is this an `acked` / `resolved` a person made through the api? Logs one that cannot be applied."""
+    if d.get("change") not in USER_CHANGES or d.get("actor") in OWN_ACTORS:
+        return False  # our own records and every other change: nothing to apply
+    actor, alert = d.get("actor"), d.get("alert")
+    if (type(actor) is str and actor and type(alert) is dict and type(alert.get("id")) is str
+            and not _BAD.search(actor + alert["id"])):
+        return True
+    log.warning("skipped %s[%s]@%s: %s without a usable actor or alert.id", msg.topic(), msg.partition(), msg.offset(), d["change"])
+    return False
+
+
 def _commit(consumer, offsets: dict) -> None:
     try:
         consumer.commit(offsets=[TopicPartition(t, p, o) for (t, p), o in offsets.items()], asynchronous=False)
@@ -106,10 +120,11 @@ class Processor:
     """One replica's loop. `now` is a monotonic clock in seconds, read only here, for the housekeeping intervals;
     `utcnow` is the wall clock (aware UTC datetime) that auto-resolve compares ingest times with."""
 
-    def __init__(self, consumer, config_consumer, config, store, relay, now=time.monotonic,
+    def __init__(self, consumer, config_consumer, changes_consumer, config, store, relay, now=time.monotonic,
                  utcnow=lambda: datetime.now(UTC)):
-        self.consumer, self.config_consumer, self.config, self.store, self.relay, self.now, self.utcnow = (
-            consumer, config_consumer, config, store, relay, now, utcnow)
+        self.consumer, self.config_consumer, self.changes_consumer, self.config, self.store, self.relay = (
+            consumer, config_consumer, changes_consumer, config, store, relay)
+        self.now, self.utcnow = now, utcnow
         self._flushed = self._resolved = self._refreshed = self._logged = now()
         self.events = self.matches = self._logged_events = 0
 
@@ -161,7 +176,12 @@ class Processor:
         if t - self._resolved >= RESOLVE_S:
             self.store.resolve_quiet(self.utcnow())
             self._resolved = t
-        self.relay.drain()  # after the flush and auto-resolve, so their changes leave in this step too
+        if msgs := self.changes_consumer.consume(num_messages=BATCH, timeout=0):
+            if records := [d for m in msgs if (d := _decode(m)) and _user_change(m, d)]:
+                self.store.apply_changes(records)
+            if offsets := {(m.topic(), m.partition()): m.offset() + 1 for m in msgs if not m.error()}:
+                _commit(self.changes_consumer, offsets)  # after apply: a crash before this line means redelivery
+        self.relay.drain()  # after the flush, auto-resolve and resolves, so their changes leave in this step too
         if msgs := self.config_consumer.consume(num_messages=BATCH, timeout=0):
             if records := [d for m in msgs if (d := _decode(m))]:
                 self.config.apply(records)
@@ -241,11 +261,15 @@ def _run(brokers: str, db_url: str, redis_url: str) -> None:
     config_consumer = Consumer({"bootstrap.servers": brokers, "group.id": "processor-config",
                                 "enable.auto.commit": False, "auto.offset.reset": "earliest"})
     config_consumer.subscribe([CONFIG_TOPIC])
+    # the same for people's acks and resolves: each record is applied by one replica
+    changes_consumer = Consumer({"bootstrap.servers": brokers, "group.id": "processor-changes",
+                                 "enable.auto.commit": False, "auto.offset.reset": "earliest"})
+    changes_consumer.subscribe([CHANGES_TOPIC])
     # Relay needs per-key order on retries, and a final callback for every message within its flush
     producer = Producer({"bootstrap.servers": brokers, "enable.idempotence": True, "message.timeout.ms": MESSAGE_TIMEOUT_MS})
     store = Store(psycopg.connect(db_url, autocommit=True), r)
     relay = Relay(psycopg.connect(db_url, autocommit=True), producer, r)
-    proc = Processor(consumer, config_consumer, Config(psycopg.connect(db_url, autocommit=True)), store, relay)
+    proc = Processor(consumer, config_consumer, changes_consumer, Config(psycopg.connect(db_url, autocommit=True)), store, relay)
 
     stop = []
     for s in (signal.SIGTERM, signal.SIGINT):
@@ -257,4 +281,5 @@ def _run(brokers: str, db_url: str, redis_url: str) -> None:
     relay.drain()
     consumer.close()
     config_consumer.close()
+    changes_consumer.close()
     log.info("processor stopped")
