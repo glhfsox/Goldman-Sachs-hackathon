@@ -16,6 +16,9 @@ A Kafka source is a `sources` row of kind `kafka` naming a `source.*` topic on t
 cluster (`SOURCE_KAFKA_BROKERS`), e.g. `{"id": "workflows-kafka", "kind": "kafka", "config": {"topic": "source.workflows"}}`.
 Ingest consumes it and republishes each message to `events.raw` on the internal cluster in the same raw record. Ingest never parses, filters or transforms the payload.
 
+What the sources send (source ids, `source.*` topics and records, HTTP sender behaviour, payload catalog):
+[data/sources.md](data/sources.md).
+
 ## 2. Raw event: topic `events.raw`
 
 ```json
