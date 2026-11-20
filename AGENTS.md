@@ -42,6 +42,7 @@ All backend services share one Kafka cluster ([contracts/services.md](contracts/
 - Consuming events from another service? Read that record's schema in `contracts/events.md` first, and map its fields to yours explicitly. Never guess a field.
 - Changing a record (field added, removed, renamed, type or meaning changed)? Update `contracts/events.md` in the same PR. The code is the source of truth: the docs must match it, never the other way round.
 - Breaking record changes follow the rules in "Contracts" above.
+- Kafka delivers at least once, so a record can arrive twice. Make processing idempotent wherever a repeat would do harm (alerts, notifications and deliveries, runbook actions, anything that sends). Every record carries a stable id (e.g. `event_id`); the consumer or command handler stores the processed id (unique constraint, or Redis `SET NX`) in the same transaction as its effect, so a replay changes nothing. Skip it where a repeat is harmless. Document the id field in `contracts/events.md`.
 
 ## Database schemas (`contracts/schemas/`)
 Every service has its own Postgres and is the only one that connects to it; the Kafka cluster is shared. `contracts/schemas/<service>.md` describes that service's tables: columns, types, keys, and for a copied table where the data comes from. Overview and shared rules: `contracts/storage.md`.
