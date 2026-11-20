@@ -79,10 +79,15 @@ Only state changes, never one record per event.
 | `count_threshold` | processor | `count` crosses 10, 100, 1000 |
 | `reopened` | processor | An event arrives for a resolved alert inside its reopen window |
 | `acked`, `resolved` | api (`actor` = user id) | A person acts in the UI |
-| `resolved` | notifier (`actor` = `"auto"`) | No recurrence for the rule's window |
+| `resolved` | processor (`actor` = `"auto"`) | No recurrence for the rule's window |
 
-Whoever publishes a change writes Postgres first, then Kafka, then Redis `ui.alerts`.
-On `acked` the notifier cancels every notification of that alert that is still pending.
+Whoever publishes a change writes its own database first, with the record in an `outbox` table in the
+same transaction ([storage.md](storage.md)), then Kafka, then Redis `ui.alerts`.
+
+Consumers: the notifier (policy and delivery; on `acked` it cancels every notification of that alert
+that is still pending), the api (its read copy of alerts and the timeline) and the processor, which owns
+alert state and applies the `acked` and `resolved` records the api published. Every consumer ignores
+changes it published itself and applies the rest idempotently by `change_id`.
 
 ## 5. Live UI updates: Redis pub/sub channel `ui.alerts`
 
@@ -95,4 +100,77 @@ The API relays these to browsers over WebSocket (see [api.md](api.md)). Loss is 
 ```
 
 - `count`: published by the processor at most once per second per alert.
-- `timeline`: published by any service that appends to `alert_events` (notification sent, action run).
+- `timeline`: published by the api after it stores a timeline row (from `alerts.changes`,
+  `alerts.timeline` or its own action runs).
+
+## 6. Configuration: topic `config.changes`
+
+The api owns all configuration and publishes every insert, update and soft-delete here. The topic is
+compacted and keyed by `<kind>:<id>`, so a service that starts with an empty database reads it from the
+beginning and ends up with the current state. Consumers upsert by id and ignore a record older than
+the row they hold.
+
+```json
+{
+  "kind": "rule",
+  "id": "settlements-workflow-failed",
+  "updated_at": "2026-11-20T09:30:00.000Z",
+  "deleted": false,
+  "body": {"id": "settlements-workflow-failed", "team_id": "settlements", "enabled": true, "...": "the Rule, see rules.md"}
+}
+```
+
+| `kind` | `id` | `body` | Copied by |
+|---|---|---|---|
+| `source` | source id | `{id, kind, config, enabled}` | ingest |
+| `mapping` | mapping id | Mapping ([rules.md](rules.md) §3) | processor |
+| `rule` | rule id | Rule ([rules.md](rules.md) §4) | processor, notifier |
+| `service_dep` | `<service>:<depends_on>` | `{service, depends_on}` | processor |
+| `team` | team id | `{id, name}` | notifier |
+| `user` | user id | `{id, name, email, phone}` | notifier |
+| `membership` | `<team_id>:<user_id>` | `{team_id, user_id, on_call}` | notifier |
+| `preferences` | user id | Preferences ([rules.md](rules.md) §5) | notifier |
+| `runbook` | runbook id | `{id, team_id, title, format, source, canonical, status, version}` | notifier (`active`), ai-worker (`draft`, to convert) |
+
+`deleted: true` (with `body: null`) is used only for rows that really disappear (`membership`,
+`service_dep`); everything else is disabled through its `enabled` or `status` field.
+
+## 7. Timeline entries from other services: topic `alerts.timeline`
+
+What the notifier did for an alert. The api stores each record as an `alert_events` row (`entry_id`
+becomes the row id) and keeps the `notification` object as its copy of that notification.
+
+```json
+{
+  "entry_id": "01JD3KA...",
+  "alert_id": "01JD3K8...",
+  "at": "2026-11-20T10:15:03.412Z",
+  "actor": "notifier",
+  "kind": "notification_sent",
+  "data": {"notification": {"id": "9f2c...", "user_id": "marek", "channel": "sms", "status": "sent",
+                            "reason": "rule settlements-workflow-failed, on-call",
+                            "send_at": "2026-11-20T10:15:02.200Z", "sent_at": "2026-11-20T10:15:03.410Z", "error": null}}
+}
+```
+
+`kind`: `notification_sent`, `notification_failed`, `notification_suppressed`. Alert state changes are
+not repeated here: the api derives those timeline rows from `alerts.changes`.
+
+## 8. New schemas: topic `schema.samples`
+
+Published by the processor once per fingerprint, when an event matches no mapping.
+
+```json
+{
+  "fingerprint": "9f2c41d0...",
+  "source_id": "trades-kafka",
+  "seen_at": "2026-11-20T10:15:02.123Z",
+  "sample": {"meta": {"schema": "trade.rejected.v1", "producer": "trade-gateway", "ts": 1795169702000},
+             "payload": {"tradeId": "T-88121", "desk": "rates", "notional": 25000000, "currency": "EUR", "reason": "LIMIT_BREACH"}}
+}
+```
+
+The ai-worker proposes a mapping and saves it through the api (`PUT /mappings/{id}`, [api.md](api.md));
+the api lists the samples under `GET /schema-samples`. `fingerprint` is a hash of the source id, the
+payload's key paths to depth 3 and the values of type-like fields (`type`, `schema`, `event`, `eventType`,
+`kind`, `alertname`), so two business events in the same `{meta, payload}` envelope are different schemas.

@@ -1,0 +1,84 @@
+# Database `processor` (service: processor)
+
+Host `processor-db`. Only the processor connects. Migrations: `backend/processor/migrations/`.
+Shared rules: [../storage.md](../storage.md).
+
+## Owned tables
+
+### `alerts`: source of truth for alert state
+
+The [Alert object](../api.md) plus three internal columns that never leave the service.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | text, primary key | |
+| `alert_key` | text, not null | Internal. Rule id plus a hash of the rule's `alert_key` values |
+| `rule_id` | text, not null | |
+| `team_id` | text, not null | |
+| `incident_id` | text | References `incidents.id` |
+| `status` | text, not null | `open`, `acked`, `resolved` |
+| `severity` | text, not null | `info`, `warning`, `error`, `critical`; only ever raised |
+| `title`, `body` | text, not null | Rendered from the rule's templates on the first event |
+| `fields` | jsonb, not null | Path → value, from the rule's `present.fields` |
+| `color` | text | |
+| `count` | bigint, not null | Flushed from Redis about once per second; never goes down |
+| `first_seen`, `last_seen` | timestamptz, not null | Event time (`ts`) of the first and the latest event |
+| `first_received_at` | timestamptz, not null | Ingest time of the first event: start of the latency measurement |
+| `last_received_at` | timestamptz, not null | Internal. Ingest time of the latest event; window arithmetic uses it |
+| `runbook_id` | text | |
+| `acked_by`, `resolved_by` | text | User id, or `auto` |
+| `sample_event` | jsonb, not null | Envelope of the first event |
+| `opened_by_event` | text, not null | Internal. `event_id` that last opened or reopened the alert, so a redelivered event is not counted twice |
+
+- Unique index on `alert_key` where `status <> 'resolved'`: at most one live alert per key. This index,
+  not Redis, decides whether an alert exists.
+- Index on (`alert_key`, `last_received_at` desc) for the reopen lookup.
+- `status`, `acked_by` and `resolved_by` also change when the processor applies an `acked` or `resolved`
+  record that the api published to `alerts.changes`.
+
+### `incidents`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | text, primary key | |
+| `root_alert_id` | text, not null | Earliest alert on the most upstream service |
+| `status` | text, not null | `open`, `resolved` |
+| `created_at` | timestamptz, not null | |
+
+### `outbox`
+
+Kafka records waiting to be published. Written in the same transaction as the change they describe.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | bigserial, primary key | The relay publishes in `id` order and deletes the row afterwards |
+| `topic` | text, not null | `alerts.changes` or `schema.samples` |
+| `key` | text, not null | Kafka key: alert id, or fingerprint |
+| `payload` | jsonb, not null | The record, exactly as in [../events.md](../events.md) |
+
+### `schema_samples`: schemas already reported
+
+| Column | Type | Notes |
+|---|---|---|
+| `fingerprint` | text, primary key | Hash of source id, key paths to depth 3 and the values of type-like fields |
+| `source_id` | text, not null | |
+| `created_at` | timestamptz, not null | |
+
+Insert with `ON CONFLICT DO NOTHING`; only a successful insert puts a `schema.samples` record into
+`outbox`, so a burst of a new schema causes one Claude call.
+
+## Copies (fed by Kafka `config.changes`)
+
+| Table | Columns | From kind |
+|---|---|---|
+| `mappings` | `id` text primary key, `status` text, `priority` int, `body` jsonb ([../rules.md](../rules.md) §3), `updated_at` timestamptz | `mapping` |
+| `rules` | `id` text primary key, `team_id` text, `enabled` boolean, `body` jsonb ([../rules.md](../rules.md) §4), `updated_at` timestamptz | `rule` |
+| `service_deps` | `service` text, `depends_on` text, primary key on both | `service_dep` |
+
+The processor compiles `mappings` and `rules` into memory and recompiles within 5 s of a change.
+
+## Not here
+
+The timeline (`alert_events`) lives in the api's database: the api derives the processor's entries
+(`opened`, `severity_raised`, `reopened`, auto `resolved`) from `alerts.changes`.
+Per-event counters and the offsets already counted live in Redis, not in Postgres.
