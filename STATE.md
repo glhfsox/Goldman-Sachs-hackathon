@@ -17,4 +17,5 @@ Format: `- DD-MM HH:MM · **what** — what changed for others. Affects: zones. 
 ## SviatoslavShpylovyi — backend
 
 ## oshuptar — frontend, presentation
+- 21-11 00:05 · **Idempotent processing rule** — Kafka delivers at least once, so every record carries a stable id and consumers or command handlers that cause harmful repeats (alerts, notifications, deliveries, runbook actions) store the processed id in the same transaction as the effect. Affects: backend, data, ai. Where: AGENTS.md "Kafka events".
 - 20-11 23:49 · **Shared Kafka for local runs** — `docker compose up -d` in `backend/kafka/` starts one broker (`kafka:9092` in compose, `localhost:9092` on the host) and creates the five internal topics; other compose files add it with `include: - path: ../kafka/docker-compose.yml` and wait for `kafka-init`. New rule: a service that produces or consumes Kafka records documents or reads them in `contracts/events.md` and updates it with the code (AGENTS.md "Kafka events"). The sources cluster is not part of it. Affects: backend, data, ai. Where: backend/kafka/, backend/AGENTS.md, AGENTS.md.
