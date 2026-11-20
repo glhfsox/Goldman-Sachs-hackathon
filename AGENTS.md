@@ -14,8 +14,8 @@ Everything in the repo is in English: code, comments, docs, `STATE.md` and `HAND
 |---|---|---|
 | `ai/` | glhfsox | models, prompts, inference, eval |
 | `data/` | glhfsox, spdsslg | collection, cleaning, datasets, features |
-| `backend/` | SviatoslavShpylovyi | API, DB, integrations |
-| `frontend/` | oshuptar | UI |
+| `backend/` | SviatoslavShpylovyi, oshuptar | API, DB, integrations |
+| `frontend/` | everyone | UI |
 | `presentation/` | oshuptar | slides, demo materials |
 | `contracts/ai/`, `contracts/data/`, `contracts/backend/` | owner of that zone | interfaces the zone provides; files directly in `contracts/` are shared |
 | root, `.github/`, `.claude/`, `scripts/` | glhfsox | repo infrastructure |
