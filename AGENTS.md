@@ -39,7 +39,7 @@ Everything where zones touch: API endpoints, dataset formats, model input/output
 ## Database schemas (`contracts/schemas/`)
 Every service has its own Postgres and is the only one that connects to it; the Kafka cluster is shared. `contracts/schemas/<service>.md` describes that service's tables: columns, types, keys, and for a copied table where the data comes from. Overview and shared rules: `contracts/storage.md`.
 - Two services exchange data (a Kafka record, a REST call, a table one of them copies)? Read both services' schema files before writing code, and map the fields from one to the other explicitly. The same thing can have a different name, type or nullability on each side; never assume the other side's columns.
-- Changed a schema, or added or ran a migration of any kind (new table or column, type change, index, rename, backfill)? In the same PR change the migration in `backend/<service>/migrations/` and `contracts/schemas/<service>.md`. Never one without the other: the file must always describe the database as the migrations leave it.
+- Changed a schema, or added or ran a migration of any kind (new table or column, type change, index, rename, backfill)? In the same PR change the migration and `contracts/schemas/<service>.md`. Each service decides where its own migrations live. Never one without the other: the file must always describe the database as the migrations leave it.
 - The changed column travels to another service? Update the record format in `contracts/events.md` in that PR too, and check the schema file of every service that copies it.
 - Never read or write another service's database, not even in tests or scripts. Need its data? Consume the topic, or ask its owner for a new record.
 
