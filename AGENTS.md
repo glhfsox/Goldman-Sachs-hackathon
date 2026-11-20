@@ -81,7 +81,7 @@ Lives at the repo root, one per person, never committed. The agent maintains it.
 - No destructive git operations (`reset --hard`, `push --force` to shared branches, deleting others' branches) unless your operator explicitly asks.
 
 ## Checks and tests
-- Every zone with code has `<zone>/check.sh`: fast checks (lint + unit tests), about 60 s max, no model training. The owner decides what goes in it. It runs from the zone folder.
+- Every zone with code has `<zone>/check.sh`: fast checks (lint + unit tests), about 60 s max, no model training. The owner decides what goes in it. It runs from the zone folder. A service has its own: `backend/<service>/check.sh` runs, from that folder, when a file under it changes.
 - `check.sh` sets up its own environment idempotently and must pass on a fresh clone and on a bare `ubuntu-latest` CI runner (python3, node, npm preinstalled; no uv). Examples: `uv run pytest` after `command -v uv || pip install uv`, `[ -d node_modules ] || npm ci`. Installing dependencies may use the network; the tests themselves must not.
 - Test what breaks neighbours (contract conformance) and critical logic. Don't chase coverage.
 - `python3 scripts/team.py check` runs the checks of zones changed in the working tree. The Claude hook runs them before the agent ends its turn and won't let it finish on red.

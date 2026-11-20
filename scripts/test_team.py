@@ -44,6 +44,21 @@ with tempfile.TemporaryDirectory() as tmp:
     finally:
         team.ROOT = root
 
+# a service folder's own check.sh runs when a file under it changes; other services' checks do not
+import contextlib, io
+with tempfile.TemporaryDirectory() as tmp:
+    for d, code in [("backend", 0), ("backend/processor", 1), ("backend/api", 1)]:
+        (Path(tmp) / d).mkdir(parents=True, exist_ok=True)
+        (Path(tmp) / d / "check.sh").write_text(f"exit {code}\n")
+    team.ROOT, root = Path(tmp), team.ROOT
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            failed = team.run_checks(["backend/processor/processor/core.py", "README.md"])
+            assert [f.split()[0] for f in failed] == ["backend/processor/check.sh"], failed
+            assert team.run_checks(["backend/readme.md"]) == []
+    finally:
+        team.ROOT = root
+
 # every zone has its own line in the real CODEOWNERS; provider contract folders override the shared contracts/ line
 real = team.codeowners()
 patterns = [p for p, _ in real]

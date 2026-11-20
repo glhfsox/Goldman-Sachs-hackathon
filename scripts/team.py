@@ -158,9 +158,11 @@ def cmd_post(affects, title, body):
 
 
 def run_checks(files):
-    """Run <zone>/check.sh for every changed zone that has one. Returns failure reports."""
+    """Run check.sh of every changed zone and service folder (<zone>/, <zone>/<service>/) that has one.
+
+    Returns failure reports."""
     failed = []
-    for zone in sorted({f.split("/")[0] for f in files if "/" in f}):
+    for zone in sorted({"/".join(f.split("/")[:n]) for f in files for n in (1, 2) if f.count("/") >= n}):
         if not (ROOT / zone / "check.sh").is_file():
             continue
         print(f"== {zone}/check.sh", file=sys.stderr, flush=True)
