@@ -15,6 +15,7 @@ Everything in the repo is in English: code, comments, docs, `STATE.md` and `HAND
 | `ai/` | glhfsox | models, prompts, inference, eval |
 | `data/` | glhfsox, spdsslg | collection, cleaning, datasets, features |
 | `backend/` | SviatoslavShpylovyi, oshuptar | API, DB, integrations |
+| `backend/ai-worker/` | glhfsox | AI worker service (schema mappings, runbook conversion) |
 | `frontend/` | everyone | UI |
 | `presentation/` | oshuptar | slides, demo materials |
 | `contracts/ai/`, `contracts/data/`, `contracts/backend/` | owner of that zone | interfaces the zone provides; files directly in `contracts/` are shared |

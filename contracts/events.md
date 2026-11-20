@@ -12,8 +12,9 @@ Timestamps are ISO 8601 UTC with milliseconds. Ids are opaque strings (ULID or U
 | `404` | Unknown or disabled `source_id` |
 | `503` | Kafka unavailable; the caller retries |
 
-A Kafka source is a `sources` row of kind `kafka` naming a `source.*` topic; ingest republishes each
-message in the same raw record. Ingest never parses, filters or transforms the payload.
+A Kafka source is a `sources` row of kind `kafka` naming a `source.*` topic on the separate sources
+cluster (`SOURCE_KAFKA_BROKERS`), e.g. `{"id": "workflows-kafka", "kind": "kafka", "config": {"topic": "source.workflows"}}`.
+Ingest consumes it and republishes each message to `events.raw` on the internal cluster in the same raw record. Ingest never parses, filters or transforms the payload.
 
 ## 2. Raw event: topic `events.raw`
 
