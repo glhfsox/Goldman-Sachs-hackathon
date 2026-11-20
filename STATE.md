@@ -13,6 +13,7 @@ Format: `- DD-MM HH:MM · **what** — what changed for others. Affects: zones. 
 - 20-11 22:40 · **Architecture agreed** — five services (ingest, processor, notifier, api, ai-worker) on a shared Kafka + Redis, one Postgres each; no Claude call per event; the LLM only writes schema mappings and converts runbooks, off the event path. Affects: all zones. Where: OVERVIEW.md "Architecture", docs/architecture/map.jsonl.
 
 ## spdsslg — data
+- 21-11 00:02 · **Sources contract v1** — what simulated (and real) sources send to ingest: 4 source ids to seed (`workflows-kafka`, `trades-kafka`, `alertmanager-http`, `pricing-logs-http`), `source.workflows` / `source.trades` records on `kafka-sources`, one event per HTTP request or Kafka message, sender retry rules, payload catalog with field types and examples, deliberate edge cases, volume profiles. The data zone will provide the `kafka-sources` broker; the simulator itself comes later. Affects: backend (ingest, processor seed mappings). Where: contracts/data/sources.md, contracts/events.md §1.
 
 ## SviatoslavShpylovyi — backend
 
