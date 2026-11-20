@@ -203,8 +203,9 @@ Sent on purpose in demo and test runs, in small numbers; ingest must not crash o
 | `INGEST_URL` (used by HTTP senders) | `http://localhost:8001` | `http://ingest:8001` |
 | `SOURCE_KAFKA_BROKERS` | `localhost:9094` | `kafka-sources:9092` |
 
-The `kafka-sources` broker and its topics come from the data zone (`data/`), so ingest does not run its own.
-Until the simulator exists, a quick manual test:
+The `kafka-sources` broker and its topics come from the data zone: [data/kafka-sources/](../../data/kafka-sources/README.md)
+(`docker compose up -d` there, or `include:` it from your compose file), so ingest does not run its own.
+Until the simulator exists, `bash data/kafka-sources/produce.sh` sends the §4 examples to Kafka, and for HTTP:
 
 ```bash
 curl -i -X POST localhost:8001/ingest/alertmanager-http -H 'Content-Type: application/json' \
