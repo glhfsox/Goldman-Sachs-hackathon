@@ -3,11 +3,11 @@
 *                @glhfsox
 /ai/             @glhfsox
 /data/           @glhfsox @spdsslg
-/backend/        @SviatoslavShpylovyi
-/frontend/       @oshuptar
+/backend/        @SviatoslavShpylovyi @oshuptar
+/frontend/       @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar
 /presentation/   @oshuptar
 /contracts/          @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar
 /contracts/ai/       @glhfsox
 /contracts/data/     @glhfsox @spdsslg
-/contracts/backend/  @SviatoslavShpylovyi
+/contracts/backend/  @SviatoslavShpylovyi @oshuptar
 /STATE.md            @glhfsox @spdsslg @SviatoslavShpylovyi @oshuptar

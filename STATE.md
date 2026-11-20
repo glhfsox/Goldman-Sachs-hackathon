@@ -10,4 +10,4 @@ Format: `- DD-MM HH:MM · **what** — what changed for others. Affects: zones. 
 
 ## SviatoslavShpylovyi — backend
 
-## oshuptar — frontend, presentation
+## oshuptar — backend, frontend, presentation
