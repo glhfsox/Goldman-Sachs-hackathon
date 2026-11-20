@@ -12,10 +12,10 @@ The stack of each service is its owners' choice; the interfaces here are JSON sh
 | Service | Code | Port | Consumes | Produces |
 |---|---|---|---|---|
 | ingest | `backend/ingest/` | 8001 (HTTP) | HTTP webhooks; `source.*` topics on the sources Kafka cluster; Kafka `config.changes` (sources) | Kafka `events.raw` |
-| processor | `backend/processor/` | none | Kafka `events.raw`, `config.changes` (mappings, rules, service map), `alerts.changes` (acked, resolved) | Kafka `alerts.changes`, `schema.samples`; Redis `ui.alerts` |
+| processor (owner: glhfsox) | `backend/processor/` | none | Kafka `events.raw`, `config.changes` (mappings, rules, service map), `alerts.changes` (acked, resolved) | Kafka `alerts.changes`, `schema.samples`; Redis `ui.alerts` |
 | notifier | `backend/notifier/` | none | Kafka `alerts.changes`, `config.changes` (rules, teams, users, memberships, preferences, runbooks) | Channel adapters; Kafka `alerts.timeline` |
 | api | `backend/api/` | 8000 (HTTP + WebSocket) | Kafka `alerts.changes`, `alerts.timeline`, `schema.samples`; Redis `ui.alerts` | Kafka `config.changes`, `alerts.changes` (acked, resolved); REST and WebSocket |
-| ai-worker (owner: glhfsox) | `backend/ai-worker/` | none | Kafka `schema.samples`, `config.changes` (runbook drafts); Claude API | REST calls to the api: mappings, canonical runbooks, proposals |
+| ai-worker (owners: glhfsox, spdsslg) | `backend/ai-worker/` | none | Kafka `schema.samples`, `config.changes` (runbook drafts); Claude API | REST calls to the api: mappings, canonical runbooks, proposals |
 | UI | `frontend/` | 3000 | API on 8000 | none |
 
 Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](storage.md),
@@ -58,6 +58,7 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 | `DATABASE_URL` | all backend services, each its own value | `postgres://alerts:alerts@processor-db:5432/processor` (hosts and database names: [storage.md](storage.md)) |
 | `API_URL` | ai-worker | `http://api:8000` |
 | `REDIS_URL` | processor, notifier, api | `redis://redis:6379/0` |
+| `PROCESSOR_WORKERS` | processor | `1` (default). Worker processes inside one container; each is a full replica with its own Kafka consumer in group `processor` |
 | `SMTP_HOST`, `SMTP_PORT` | notifier | `mailhog`, `1025` |
 | `SMS_GATEWAY_URL`, `CALL_GATEWAY_URL` | notifier | `http://mock-gateway:8002/sms`, `http://mock-gateway:8002/call` |
 | `PUBLIC_BASE_URL` | notifier, api | `http://localhost:3000` (short alert link: `{PUBLIC_BASE_URL}/a/{alert_id}`) |

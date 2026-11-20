@@ -57,6 +57,13 @@ Ingest consumes it and republishes each message to `events.raw` on the internal 
   Rules can still match it through `raw.*`, and the UI shows it as unmapped.
 - The envelope is not a Kafka record. It is stored on the alert as `sample_event` and is what rule
   conditions, templates and runbook placeholders read (path rules in [rules.md](rules.md)).
+- Rules and templates always see the whole payload. The copy stored on the alert is capped so that no
+  change record gets too large for Kafka: a `raw` whose JSON is longer than 16,384 characters is stored as
+  `{"_truncated": true, "_chars": <length>, "_preview": "<first 2,000 characters>…"}`.
+- Input the processor repairs instead of dropping: NUL characters and lone surrogates in payload strings
+  become U+FFFD, and `NaN` / `Infinity` become `null`. It skips (and logs) only what cannot be stored:
+  an `event_id` or `source_id` with such characters, a `received_at` outside years 1 to 9999, or a payload
+  nested deeper than 64 levels.
 
 ## 4. Alert change: topic `alerts.changes`
 
@@ -88,6 +95,34 @@ Consumers: the notifier (policy and delivery; on `acked` it cancels every notifi
 that is still pending), the api (its read copy of alerts and the timeline) and the processor, which owns
 alert state and applies the `acked` and `resolved` records the api published. Every consumer ignores
 changes it published itself and applies the rest idempotently by `change_id`.
+
+### What the notifier gets from the processor
+
+Every record the processor publishes carries these fields, always present and never null unless noted.
+The notifier builds its messages from them and needs nothing else from the processor.
+
+| What | Field | Notes |
+|---|---|---|
+| Title | `alert.title` | Text, at most 300 characters, never empty: the rule's title template, else the rule's name, else `type · service` |
+| Message | `alert.body` | Text, at most 2,000 characters; empty string when the rule has no body template |
+| Severity | `alert.severity` | `info`, `warning`, `error` or `critical`: the highest seen on this alert so far |
+| Time of this change | `at` | When it happened, ingest clock. Use it for ordering and for "sent N seconds after" |
+| Time of the problem | `alert.first_seen`, `alert.last_seen` | Event time of the first and of the latest event, as the source reported it |
+| Which alert | `alert.id`, `change_id`, `change` | `alert.id` for the short link and for cancelling on ack; `change_id` to ignore a record delivered twice |
+| Who it is for | `alert.rule_id`, `alert.team_id` | The notifier resolves recipients and channels from its own copy of that rule |
+| Extras for the message | `alert.count`, `alert.fields`, `alert.color`, `alert.runbook_id` | `fields` is path → value, each value at most 500 characters; `color` and `runbook_id` may be null |
+
+All times are ISO 8601 UTC with milliseconds. Example of what the notifier reads:
+
+```json
+{"change_id": "7c1e...", "change": "opened", "at": "2026-11-20T10:15:02.123Z", "actor": "processor",
+ "alert": {"id": "5b0f...", "rule_id": "settlements-workflow-failed", "team_id": "settlements",
+           "title": "order-settlement failed at step settle",
+           "body": "Counterparty service did not respond in 5000 ms",
+           "severity": "critical", "first_seen": "2026-11-20T10:15:01.000Z", "last_seen": "2026-11-20T10:15:01.000Z",
+           "count": 1, "fields": {"step": "settle", "error.code": "TIMEOUT"}, "color": "red",
+           "runbook_id": "settlement-timeout", "...": "the other Alert fields, see api.md"}}
+```
 
 ## 5. Live UI updates: Redis pub/sub channel `ui.alerts`
 
