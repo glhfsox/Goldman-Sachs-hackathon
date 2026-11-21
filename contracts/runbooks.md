@@ -29,6 +29,8 @@ converted once to this form in `runbooks.canonical`. Only `active` runbooks are 
   unless the action is registered as `read_only`.
 - `when` is shown to the person as a condition; it is not evaluated.
 - `matches` uses the condition language and paths of [rules.md](rules.md). Placeholders are `{{path}}`.
+  `matches` may be left out when the source does not say what the runbook applies to; such a runbook
+  is shown only on alerts of a rule that names it in `runbook_id`.
 - A `link` runbook is stored as one step `{"text": "Open the runbook", "link": "<url>"}`. The URL is never fetched.
 
 Conversion: the canonical form is internal. A person writes and keeps seeing the runbook in their own
