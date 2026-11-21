@@ -20,6 +20,16 @@ public sealed class RunRepository : IRunRepository
         return await _context.Runs.FirstOrDefaultAsync(run => run.Id == id, cancellationToken);
     }
 
+    public async Task<RunbookRun?> GetLatestByAlertIdAsync(string alertId, CancellationToken cancellationToken = default)
+    {
+        return await _context.Runs
+            .AsNoTracking()
+            .Where(run => run.AlertId == alertId)
+            .OrderByDescending(run => run.CreatedAt)
+            .ThenByDescending(run => run.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<bool> HasLiveRunAsync(string alertId, CancellationToken cancellationToken = default)
     {
         return await _context.Runs.AnyAsync(
