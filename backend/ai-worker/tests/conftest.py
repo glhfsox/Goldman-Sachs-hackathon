@@ -51,7 +51,7 @@ def db(pg_url):
 
 @pytest.fixture
 def conns(db):
-    """(autocommit connection for enqueue and asserts, transactional connection for claims) on an empty table."""
+    """(autocommit connection for enqueue and asserts, transactional connection for claims) on empty tables."""
     with psycopg.connect(db, autocommit=True) as pg, psycopg.connect(db) as jobs_pg:
-        pg.execute("TRUNCATE jobs")
+        pg.execute("TRUNCATE jobs, alert_history, run_history")
         yield pg, jobs_pg

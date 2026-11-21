@@ -85,6 +85,82 @@ people ran actions on it; accepting it saves that runbook as `active`. Example:
              "params": {"url": "http://counterparty-service/health"}, "approval": "none"}]}}}
 ```
 
+A proposal of kind `rule_severity` suggests the severity a rule should fix for its alerts (the rule's
+`severity`, [rules.md](rules.md) §4). The ai-worker files it on one of the rule's alerts: on the rule's
+first alert (`mode: "first"`, judged from the rule and that alert alone, `stats: null`), and each time the
+rule's resolved alerts reach a multiple of 20 (`mode: "history"`, judged from how people reacted to its
+most recent resolved alerts: at most 200, resolved in the last 30 days, and only when at least 20 are left).
+It is filed only when the suggestion differs from the rule's current `severity` with a confidence of at
+least 0.5. `current_severity` is null when the rule fixes none. `reasons` are plain sentences for the UI.
+Accepting it sets the rule's `severity` to `body.severity` (a `PUT /rules/{rule_id}`, published on
+`config.changes` like any rule change). Example:
+
+```json
+{"kind": "rule_severity", "body": {"rule_id": "settlements-workflow-failed", "team_id": "settlements",
+ "severity": "critical", "current_severity": "warning", "confidence": 0.82,
+ "probabilities": {"info": 0.02, "warning": 0.06, "error": 0.1, "critical": 0.82}, "mode": "history",
+ "stats": {"window": {"max_alerts": 200, "max_age_days": 30}, "resolved_alerts": 20, "acked_share": 0.7,
+           "median_minutes_to_ack": 3.0, "auto_resolved_unacked_share": 0.25, "reopened_share": 0.05,
+           "median_count": 4.0, "severities": {"critical": 20}},
+ "reasons": ["it comes from production", "people usually react within minutes",
+             "14 of 20 alerts were acknowledged by a person, median 3 min",
+             "5 of 20 resolved on their own without anyone acknowledging them", "1 of 20 were reopened",
+             "median 4 events per alert"]}}
+```
+
+### Runbook runs: needed by the ai-worker, not served by the api yet (issue #75)
+
+On top of the run model of issue #73 (run risk `read_only` / `auto` / `approval`; an `auto` run is created
+`scheduled` with `start_at` = now + cancel window). `backend/ai-worker/scripts/stub_api.py` serves these as the
+reference until the api does.
+
+| Method and path | Body | Returns |
+|---|---|---|
+| `GET /runs?risk_check=pending` | | `[RunbookRun]`: status `scheduled`, risk `auto`, `risk_check: null`. The ai-worker polls it every 2 s |
+| `POST /runs/{id}/risk-check` | `{verdict, confidence, reasons}`, `X-User: ai-worker` | `RunbookRun`. While the run is `scheduled` a `hold` always applies (the run goes to `waiting_approval`), even over an earlier `clear`; a second `clear` changes nothing. `409` when the run is no longer `scheduled` (so a `clear` after a `hold` changes nothing); the same verdict twice changes nothing |
+| `POST /runs/{id}/approve` | none, `X-User` of a person | `RunbookRun`, now `running`. `403` for a service actor |
+| `GET /runs?finished_since=<ISO time>&limit=` | | `[RunbookRun]` with status `done`, `failed` or `cancelled`, oldest first. The ai-worker polls it every 30 s from 5 minutes before the newest run it holds |
+
+- `verdict`: `clear` (the run starts at `start_at`) or `hold` (it goes to `waiting_approval` with the reasons and
+  starts when a person approves). `confidence`: 0 to 1. `reasons`: at most 6 plain sentences for the UI. The
+  ai-worker sends `clear` only when Jev chose it with confidence of at least 0.6.
+- No verdict by `start_at`: the api moves the run to `waiting_approval` (reason "risk check did not answer"); a run
+  never starts unchecked. The ai-worker never starts or approves a run.
+- A `RunbookRun` here has `id`, `alert_id`, `rule_id`, `team_id`, `runbook_id`, `risk`, `trigger` (`auto` or
+  `manual`), `status`, `start_at`, `risk_check` (`{verdict, confidence, reasons}` or null) and
+  `nodes: [{id, action, risk, params, text}]` with params filled; a finished one also `approved_by`, `approved_at`,
+  `started_at`, `finished_at`, `cancelled_by` and each node's `status`.
+
+```json
+POST /api/runs/run-7f3a/risk-check
+{"verdict": "hold", "confidence": 0.94,
+ "reasons": ["it runs in production", "customers or money are affected right now",
+             "the action cannot be undone easily"]}
+```
+
+A proposal of kind `runbook_start` says how runs of `runbook_id` on `rule_id` should start: `auto` or
+`approval`. The ai-worker files it on the alert of the pair's latest finished run each time the pair's finished
+runs reach a multiple of 10, judged from its most recent finished runs (at most 50, finished in the last 30 days,
+at least 10 left), when Jev's choice differs from `current_start` (`auto` when at least half of the window's runs had `trigger: auto`)
+with confidence of at least 0.6. Accepting it changes the rule so that runs of `runbook_id` on `rule_id` start as
+`body.start` (the shape is the api's, issue #75 question 3). Example:
+
+```json
+{"kind": "runbook_start", "body": {"rule_id": "settlements-workflow-failed", "team_id": "settlements",
+ "runbook_id": "workflow-retry", "start": "auto", "current_start": "approval", "confidence": 0.66,
+ "probabilities": {"auto": 0.83, "approval": 0.17},
+ "stats": {"window": {"max_runs": 50, "max_age_days": 30}, "runs": 10, "auto_started_share": 0.0,
+           "approved_share": 1.0, "median_seconds_from_alert_to_approve": 8, "cancelled_before_start_share": 0.0,
+           "cancelled_after_start_share": 0.0, "held_share": 0.0, "failed_share": 0.0,
+           "rule_alerts": 12, "alerts_without_run": 2, "alerts_without_run_share": 0.167},
+ "reasons": ["10 of 10 runs were approved by a person, median 8 s after the alert", "no run was cancelled",
+             "no run failed", "2 of 12 alerts of this rule got no run"]}}
+```
+
+`median_seconds_from_alert_to_approve` is measured from the alert's `opened_at` (null when the ai-worker never saw
+the alert). `rule_alerts` counts the rule's alerts opened in the same 30 days and `alerts_without_run` those that got
+no run; all three alert fields are null when the ai-worker holds no alert of the rule.
+
 The api accepts exactly what the processor reads: unknown fields, wrong types and unknown ops are `422`, and `details` has one entry per wrong path.
 
 Example invalid rule:

@@ -1,4 +1,5 @@
-"""AI worker main loop: Kafka records -> jobs -> one Claude tool-use loop per job (OVERVIEW "Architecture").
+"""AI worker main loop: Kafka records -> jobs -> one Claude tool-use loop or one Jev call per job
+(OVERVIEW "Architecture").
 
 One thread: the loop polls Kafka between jobs, so a long job delays consumption but loses nothing (enqueue is
 idempotent and offsets are committed only after the job row is inserted).
@@ -9,13 +10,15 @@ import logging
 import os
 import signal
 import sys
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import psycopg
 from confluent_kafka import OFFSET_BEGINNING, Consumer, KafkaException, TopicPartition
 
-from . import agent, jobs, mapping, runbooks
+from . import agent, jobs, judge, mapping, runbooks, runs
 from .agent import JobFailed
 from .api import Api, ApiError
 
@@ -27,7 +30,13 @@ BATCH = 100
 IDLE_S, RETRY_S = 1.0, 5.0  # poll wait with no job to run, and after a retryable failure
 MAX_POLL_INTERVAL_MS = 1_800_000  # a job (up to 6 model calls) runs between polls; a rebalance past it only redelivers
 
-HANDLERS = {"mapping": mapping.handle, "runbook": runbooks.convert, "proposal": runbooks.propose}
+HANDLERS = {"mapping": mapping.handle, "runbook": runbooks.convert, "proposal": runbooks.propose,
+            "severity": judge.handle, "run_risk": runs.risk, "run_start": runs.start}
+KEYS = {"mapping": "ANTHROPIC_API_KEY", "runbook": "ANTHROPIC_API_KEY", "proposal": "ANTHROPIC_API_KEY",
+        "severity": "TYPESAFE_API_KEY", "run_risk": "TYPESAFE_API_KEY",
+        "run_start": "TYPESAFE_API_KEY"}  # a kind runs only when its key is set
+PENDING_S, FINISHED_S = 2.0, 30.0  # how often the api's runs are polled
+PENDING_DOWN_S, RUNS_DOWN_S = 5.0, 30.0  # the wait after a failed pending poll; after a 404 or a failed finished poll
 
 
 def _decode(msg) -> dict | None:
@@ -52,16 +61,18 @@ def sample_job(d: dict) -> tuple | None:
     return f"schema:{fp}", "mapping", {"fingerprint": fp, "source_id": source_id, "sample": d["sample"]}
 
 
-def config_job(d: dict, mappings: dict) -> tuple | None:
-    """events.md §6 record: keeps `mappings` (id -> body) current; a runbook draft not yet converted -> a job."""
+def config_job(d: dict, mappings: dict, rules: dict) -> tuple | None:
+    """events.md §6 record: keeps `mappings` and `rules` (id -> body) current; a runbook draft not yet converted -> a
+    job."""
     kind, rid, body = d.get("kind"), d.get("id"), d.get("body")
     if type(rid) is not str:
         return None
-    if kind == "mapping":
+    if kind in ("mapping", "rule"):
+        copy = mappings if kind == "mapping" else rules
         if d.get("deleted") is True:
-            mappings.pop(rid, None)
+            copy.pop(rid, None)
         elif type(body) is dict:
-            mappings[rid] = body
+            copy[rid] = body
         return None
     if (kind == "runbook" and type(body) is dict and body.get("status") == "draft" and body.get("canonical") is None
             and type(body.get("version")) is int):
@@ -83,6 +94,11 @@ class Worker:
         self.pg, self.jobs_pg, self.api = pg, jobs_pg, api  # pg: autocommit, for enqueue; jobs_pg: claim transactions
         self.samples, self.config, self.changes = samples, config, changes
         self.mappings: dict[str, dict] = {}
+        self.rules: dict[str, dict] = {}
+        self.kinds = list(HANDLERS)  # the kinds `run_one` claims; main() keeps those whose key is set
+        self.runs_due = {"pending": 0.0, "finished": 0.0}  # monotonic time of the next poll of the api's runs
+        self.runs_down: set[str] = set()
+        self.runs_cursor = None  # newest `finished_at` seen; None reads it from `run_history`
 
     def _enqueue(self, job: tuple | None) -> None:
         if job and jobs.enqueue(self.pg, *job):
@@ -98,12 +114,52 @@ class Worker:
                 if not msg.error():
                     pos = msg.offset() + 1
                 if d := _decode(msg):
-                    self._enqueue(config_job(d, self.mappings))
-        log.info("read %s to offset %d: %d mappings", CONFIG_TOPIC, high, len(self.mappings))
+                    self._enqueue(config_job(d, self.mappings, self.rules))
+        log.info("read %s to offset %d: %d mappings, %d rules", CONFIG_TOPIC, high, len(self.mappings), len(self.rules))
+
+    def _change(self, d: dict) -> None:
+        """events.md §4 record: its history row and a severity job if it triggers one, then a proposal job."""
+        try:
+            self._enqueue(judge.record(self.pg, d))
+            self._enqueue(alert_job(d))
+        except (psycopg.DataError, UnicodeEncodeError) as e:  # pg is autocommit: nothing to roll back
+            log.warning("skipped %s record %s: Postgres cannot store it (%s)", CHANGES_TOPIC, d.get("change_id"), e)
+
+    def poll_runs(self) -> None:
+        """Poll the api's runs when due: `run_risk` jobs for pending checks, the finished runs into `run_history`.
+        Any failure (no `/runs` yet, api down, junk) is logged once per outage and retried after PENDING_DOWN_S
+        (pending) or RUNS_DOWN_S (finished, or a 404: the api has no `/runs`); it never stops the loop."""
+        for name, every, step in (("pending", PENDING_S, lambda: runs.pending_jobs(self.api)),
+                                  ("finished", FINISHED_S, self._sync_finished)):
+            if time.monotonic() < self.runs_due[name]:
+                continue
+            try:
+                found = step()
+            except Exception as e:  # a trust boundary: whatever the api does, consumption goes on
+                wait = RUNS_DOWN_S if name == "finished" or isinstance(e, ApiError) and e.status == 404 \
+                    else PENDING_DOWN_S
+                if name not in self.runs_down:
+                    log.warning("polling %s runs failed (%s); retrying every %ds", name, e, wait)
+                self.runs_down.add(name)
+                self.runs_due[name] = time.monotonic() + wait
+                continue
+            if name in self.runs_down:
+                log.info("polling %s runs works again", name)
+                self.runs_down.discard(name)
+            self.runs_due[name] = time.monotonic() + every
+            for job in found:
+                try:
+                    self._enqueue(job)
+                except (psycopg.DataError, UnicodeEncodeError) as e:
+                    log.warning("skipped %s: Postgres cannot store it (%s)", job[0], e)
+
+    def _sync_finished(self) -> list[tuple]:
+        found, self.runs_cursor = runs.sync_finished(self.pg, self.api, self.runs_cursor, datetime.now(UTC))
+        return found
 
     def poll(self, timeout: float) -> None:
-        for consumer, translate, wait in ((self.samples, sample_job, timeout), (self.changes, alert_job, 0),
-                                          (self.config, lambda d: config_job(d, self.mappings), 0)):
+        for consumer, translate, wait in ((self.samples, sample_job, timeout), (self.changes, self._change, 0),
+                                          (self.config, lambda d: config_job(d, self.mappings, self.rules), 0)):
             msgs = consumer.consume(num_messages=BATCH, timeout=wait)
             for msg in msgs:
                 if d := _decode(msg):
@@ -116,13 +172,16 @@ class Worker:
 
     def run_one(self) -> float:
         """Claim and run one job; returns how long the next poll may wait."""
-        job = jobs.claim(self.jobs_pg)
+        job = jobs.claim(self.jobs_pg, self.kinds)
         if job is None:
             return IDLE_S
         log.info("running %s (attempt %d)", job["id"], job["attempts"] + 1)
         ctx = SimpleNamespace(api=self.api, mappings=list(self.mappings.values()),
                               other_samples=lambda: jobs.other_samples(self.jobs_pg, job["id"]),
-                              run_agent=agent.run_agent)
+                              run_agent=agent.run_agent, rules=self.rules, ask_jev=judge.ask_jev,
+                              rule_stats=lambda rid: judge.stats(self.jobs_pg, rid, datetime.now(UTC)),
+                              run_stats=lambda rid, rb: runs.stats(self.jobs_pg, rid, rb, datetime.now(UTC)),
+                              now=lambda: datetime.now(UTC))
         try:
             result = HANDLERS[job["kind"]](job["input"], ctx)
         except (JobFailed, ApiError) as e:
@@ -164,14 +223,17 @@ def main() -> None:
     for s in (signal.SIGTERM, signal.SIGINT):
         signal.signal(s, lambda *_: stop.append(True))
     worker.drain_config()
-    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    if not has_key:
-        log.warning("ANTHROPIC_API_KEY is not set: jobs are enqueued but none is run")
+    worker.kinds = [k for k in HANDLERS if os.environ.get(KEYS[k])]
+    for key in sorted(set(KEYS.values()) - {KEYS[k] for k in worker.kinds}):
+        log.warning("%s is not set: %s jobs are enqueued but not run", key,
+                    ", ".join(k for k in HANDLERS if KEYS[k] == key))
     log.info("ai-worker started")
     wait = 0.0
     while not stop:
         worker.poll(wait)
-        wait = worker.run_one() if has_key else IDLE_S
+        if "run_risk" in worker.kinds:
+            worker.poll_runs()
+        wait = worker.run_one()
     for c in (samples, changes, config):
         c.close()
     log.info("ai-worker stopped")
