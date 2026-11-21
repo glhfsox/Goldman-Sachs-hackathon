@@ -67,6 +67,20 @@ public class Alert
             FirstSeen, LastSeen, FirstReceivedAt, RunbookId, AckedBy, ResolvedBy, SampleEvent);
     }
 
+    // Redis count messages arrive out of order with Kafka records and may repeat; only a larger value moves a counter.
+    public void ApplyCount(long count, DateTimeOffset lastSeen)
+    {
+        if (count > Count)
+        {
+            Count = count;
+        }
+
+        if (lastSeen > LastSeen)
+        {
+            LastSeen = lastSeen;
+        }
+    }
+
     // Every change record carries the whole alert, so applying one is a replace: applying it twice changes nothing.
     public void ReplaceWith(AlertSnapshot snapshot)
     {

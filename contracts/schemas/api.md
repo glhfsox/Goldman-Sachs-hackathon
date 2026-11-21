@@ -90,7 +90,7 @@ Example row:
 
 | Table | Columns | Fed by |
 |---|---|---|
-| `alerts` | `id` text primary key, then every field of the [Alert object](../api.md) as a column (`fields` and `sample_event` jsonb) | Kafka `alerts.changes` (insert or replace). Not built yet: `count` and `last_seen` from Redis `ui.alerts` `count` messages (comes with the WebSocket) |
+| `alerts` | `id` text primary key, then every field of the [Alert object](../api.md) as a column (`fields` and `sample_event` jsonb) | Kafka `alerts.changes` (insert or replace). `count` and `last_seen` also from Redis `ui.alerts` `count` messages (they only move up) |
 | `notifications` | `id` text primary key, `alert_id` text, `user_id` text, `channel` text, `status` text, `reason` text, `send_at` timestamptz, `sent_at` timestamptz, `error` text | Kafka `alerts.timeline`, the `notification` object in `data` |
 | `schema_samples` | `fingerprint` text primary key, `source_id` text, `sample` jsonb, `status` text (`pending` \| `mapped` \| `failed`), `error` text (why it failed), `created_at` timestamptz | Kafka `schema.samples` (insert as `pending`); a repeated record for a known fingerprint is ignored; `mapped` when a mapping is saved with `PUT /mappings/{id}?fingerprint=`; `failed` through `PUT /schema-samples/{fingerprint}` ([../api.md](../api.md)) |
 

@@ -20,6 +20,14 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7.4.11
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build: .
     ports:
@@ -27,9 +35,12 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       DATABASE_URL: postgres://alerts:alerts@api-db:5432/api
+      REDIS_URL: redis://redis:6379/0
       ENABLE_SWAGGER: "true"
     depends_on:
       api-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully

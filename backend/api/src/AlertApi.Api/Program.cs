@@ -9,6 +9,8 @@ using AlertApi.Domain.Repositories;
 using AlertApi.Infrastructure.Data;
 using AlertApi.Infrastructure.Kafka;
 using AlertApi.Infrastructure.Outbox;
+using AlertApi.Infrastructure.Realtime;
+using AlertApi.Infrastructure.Redis;
 using AlertApi.Infrastructure.Queries;
 using AlertApi.Infrastructure.Repositories;
 
@@ -21,6 +23,10 @@ var databaseUrl = builder.Configuration["DATABASE_URL"]
 var kafkaBrokers = builder.Configuration["KAFKA_BROKERS"]
     ?? throw new InvalidOperationException(
         "KAFKA_BROKERS is not set. Set it to the internal cluster, for example kafka:9092 (see backend/api/.env.example).");
+
+var redisUrl = builder.Configuration["REDIS_URL"]
+    ?? throw new InvalidOperationException(
+        "REDIS_URL is not set. Set it to redis://host:port/0, for example redis://redis:6379/0 (see backend/api/.env.example).");
 
 builder.Services.AddDbContext<ApiDbContext>(options =>
     options.UseNpgsql(DatabaseUrl.ToConnectionString(databaseUrl)));
@@ -45,6 +51,12 @@ builder.Services.AddScoped<IActivityRecordHandler, ActivityRecordHandler>();
 builder.Services.AddScoped<IReferenceDataQueries, ReferenceDataQueries>();
 builder.Services.AddScoped<IPreferencesRepository, PreferencesRepository>();
 builder.Services.AddScoped<IPreferencesService, PreferencesService>();
+builder.Services.AddSingleton(new RedisOptions { Url = redisUrl });
+builder.Services.AddSingleton<RedisConnection>();
+builder.Services.AddSingleton<IUiPublisher, RedisUiPublisher>();
+builder.Services.AddSingleton<ILiveFeed, LiveFeed>();
+builder.Services.AddScoped<IAlertTeamLookup, AlertTeamLookup>();
+builder.Services.AddHostedService<UiAlertsSubscriber>();
 builder.Services.AddSingleton(new ActivityConsumerOptions { Brokers = kafkaBrokers });
 builder.Services.AddHostedService<ActivityConsumer>();
 builder.Services.AddSingleton<IEventPublisher>(_ => new KafkaEventPublisher(kafkaBrokers));
@@ -81,6 +93,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 app.UseExceptionHandler();
+app.UseWebSockets();
 
 if (apiDocsEnabled)
 {
@@ -96,6 +109,7 @@ app.MapTeamEndpoints();
 app.MapUserEndpoints();
 app.MapAlertEndpoints();
 app.MapSchemaSampleEndpoints();
+app.MapLiveEndpoints();
 
 app.Run();
 
