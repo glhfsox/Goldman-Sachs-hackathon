@@ -51,6 +51,8 @@ builder.Services.AddScoped<IActivityRecordHandler, ActivityRecordHandler>();
 builder.Services.AddScoped<IReferenceDataQueries, ReferenceDataQueries>();
 builder.Services.AddScoped<IPreferencesRepository, PreferencesRepository>();
 builder.Services.AddScoped<IPreferencesService, PreferencesService>();
+builder.Services.AddScoped<IRunbookRepository, RunbookRepository>();
+builder.Services.AddScoped<IRunbookService, RunbookService>();
 builder.Services.AddSingleton(new RedisOptions { Url = redisUrl });
 builder.Services.AddSingleton<RedisConnection>();
 builder.Services.AddSingleton<IUiPublisher, RedisUiPublisher>();
@@ -109,6 +111,7 @@ app.MapTeamEndpoints();
 app.MapUserEndpoints();
 app.MapAlertEndpoints();
 app.MapSchemaSampleEndpoints();
+app.MapRunbookEndpoints();
 app.MapLiveEndpoints();
 
 app.Run();

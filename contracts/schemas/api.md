@@ -18,7 +18,7 @@ Every insert, update or soft-delete below is published to Kafka `config.changes`
 | `memberships` | `team_id` text, `user_id` text, `on_call` boolean, primary key (`team_id`, `user_id`) | `membership` |
 | `preferences` | `user_id` text primary key, `body` jsonb ([../rules.md](../rules.md) §5) | `preferences` |
 | `service_deps` | `service` text, `depends_on` text, primary key on both | `service_dep` |
-| `runbooks` | `id` text primary key, `team_id` text, `title` text, `format` text, `source` text, `canonical` jsonb ([../runbooks.md](../runbooks.md)), `status` text (`draft` \| `active`), `version` int, `updated_at` timestamptz | `runbook` |
+| `runbooks` | `id` text primary key, `team_id` text, `title` text, `format` text, `source` text, `canonical` jsonb ([../runbooks.md](../runbooks.md)), `status` text (`draft` \| `active`), `version` int, `accepted_by` text null (a person accepted this version), `accepted_at` timestamptz null, `updated_at` timestamptz | `runbook` |
 
 `teams`, `users`, `memberships`, `service_deps` and two `preferences` rows (`anna`, `boris`) are seeded by migration `AddReferenceData` (the brief's four teams, five people, `payments-api` and `order-settlement` depend on `counterparty-service`); the seed is queued on `config.changes` in the same migration like any change. There is no endpoint to change teams, users, memberships or dependencies yet.
 `sources` is seeded with the four sources of [../data/sources.md](../data/sources.md) §1 by the `AddSources` migration, which also queues their `config.changes` records in `outbox`.

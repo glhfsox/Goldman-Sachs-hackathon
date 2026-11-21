@@ -36,6 +36,8 @@ public class ApiDbContext : DbContext, IUnitOfWork
 
     public DbSet<SchemaSample> SchemaSamples => Set<SchemaSample>();
 
+    public DbSet<Runbook> Runbooks => Set<Runbook>();
+
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

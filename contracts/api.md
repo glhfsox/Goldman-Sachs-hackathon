@@ -4,7 +4,7 @@ Base URL `http://localhost:8000/api`. JSON in and out. No auth in the PoC: every
 `X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log. A service
 calling the api sends its own name there: the ai-worker sends `X-User: ai-worker`.
 `X-User` is required on `ack` and `resolve`: a missing header is `422 invalid_user`, an unknown user id is `404 not_found`.
-Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status; the api sends them as `application/problem+json`, so `title`, `status` and `detail` are there too. Codes: `not_found` (404), `conflict` (409), `invalid_<thing>` (422).
+Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status; the api sends them as `application/problem+json`, so `title`, `status` and `detail` are there too. Codes: `forbidden` (403), `not_found` (404), `conflict` (409), `invalid_<thing>` (422).
 
 ## Alert object
 
@@ -55,13 +55,18 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `GET /teams` | | `[{id, name, members: [{user_id, name, on_call}]}]`, for pickers; read-only (seeded) |
 | `GET /users` | | `[{id, name, email, phone}]`, for the user picker; read-only (seeded) |
 | `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` ([rules.md](rules.md) §5) | `Preferences`. `PUT` creates or replaces; `422 invalid_preferences` (one `details` entry per wrong path, `user_id` must equal the URL id), `404 not_found` for an unknown user, or for `GET` a user without preferences |
-| `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` until the ai-worker has converted it, [runbooks.md](runbooks.md)) |
-| `PUT /runbooks/{id}` | `{canonical?, status?}` | `Runbook` |
+| `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` and `version` 1 until the ai-worker has converted it, [runbooks.md](runbooks.md)). The id is made from `title` (lowercase, `-`, a `-2` suffix when taken) |
+| `GET /runbooks/{id}` | | `Runbook` |
+| `PUT /runbooks/{id}` | `{canonical?, status?}` | `Runbook`. A new `canonical` bumps `version` and clears `accepted_by`; `canonical.id` must equal the URL id; `active` needs a canonical. `422 invalid_runbook` with one `details` entry per wrong path |
+| `POST /runbooks/{id}/accept?version=` | none, `X-User` of a person; `version` = the version the person reviewed (required, `422` without it) | `Runbook` with `accepted_by` and `accepted_at`. `403` for a service actor or an unknown user, `409` when the runbook is not `active` or `version` is not the current one |
 | `POST /alerts/{id}/actions` | `{runbook_id, step_index}` | `ActionRun`: `running`, or `waiting_approval` when the step needs approval |
 | `POST /actions/{id}/approve`, `POST /actions/{id}/reject` | | `ActionRun` |
 | `POST /alerts/{id}/proposals` | `{kind, body}` | `Proposal` |
 | `GET /proposals?status=open` | | `[Proposal]` |
 | `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal` |
+
+A `Runbook` is `{id, team_id, title, format, source, canonical, status, version, accepted_by, accepted_at, updated_at}`;
+`canonical` is `null` on a draft.
 
 `incident` and `runbook` in `GET /alerts/{id}` are `null` until incidents and runbooks are built. `runbook`, once built, is the canonical runbook ([runbooks.md](runbooks.md)) with every
 `{{placeholder}}` already filled from the alert's `sample_event`, plus the latest `ActionRun` per step.
