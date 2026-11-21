@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 -- Postgres decides alert existence: at most one non-resolved alert per key.
 CREATE UNIQUE INDEX IF NOT EXISTS alerts_live_key ON alerts (alert_key) WHERE status <> 'resolved';
-CREATE INDEX IF NOT EXISTS alerts_key_recent ON alerts (alert_key, last_received_at DESC);
 
 -- Transactional outbox: written in the same transaction as the alert or sample, published by a relay.
 CREATE TABLE IF NOT EXISTS outbox (

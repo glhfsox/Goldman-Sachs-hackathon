@@ -26,6 +26,7 @@ THRESHOLDS = (1000, 100, 10)  # highest first: one count_threshold per flush
 # Caps on what an alert row stores and every change record ships; rules still see the full payload.
 TITLE_MAX, BODY_MAX, FIELD_MAX, RAW_MAX, PREVIEW_MAX = 300, 2000, 500, 16384, 2000
 MISS, RAISED = 0, 3
+FLUSH_LOCK, RESOLVE_LOCK = 0x666C757368, 0x7265736F6C7665  # "flush", "resolve"; relay.LOCK_ID is the outbox's
 GRACE_S = 5  # auto-resolve waits this long past window_s: covers the lag of the once-per-second flush
 
 # KEYS: alert hash, DIRTY. ARGV: partition, offset, last_seen ms, received ms, severity rank, ttl s, alert key.
@@ -284,7 +285,16 @@ class Store:
 
     def flush(self, keys=None) -> None:
         """Bring Postgres up to date with the Redis counters of dirty alerts. Call about once per second."""
-        keys = list(keys) if keys is not None else self.r.zrange(DIRTY, 0, -1)
+        if keys is None:
+            # one replica flushes the shared DIRTY set at a time, the others skip the tick instead of queueing on its row locks;
+            # a session lock, so the flush still commits before it clears the dirty marks
+            if self.pg.execute("SELECT pg_try_advisory_lock(%s)", (FLUSH_LOCK,)).fetchone()[0]:
+                try:
+                    self.flush(self.r.zrange(DIRTY, 0, -1))
+                finally:
+                    self.pg.execute("SELECT pg_advisory_unlock(%s)", (FLUSH_LOCK,))
+            return
+        keys = list(keys)
         if not keys:
             return
         hashes = dict(zip(keys, self._exec(lambda pipe: [pipe.hgetall(_hash_key(k)) for k in keys])))
@@ -345,6 +355,15 @@ class Store:
 
     def resolve_quiet(self, now: datetime) -> int:
         """Resolve alerts with no event for their rule's window_s (rules.md §4); return how many. Call every few seconds."""
+        # one replica scans and resolves at a time, the others skip this tick instead of locking the same rows
+        if not self.pg.execute("SELECT pg_try_advisory_lock(%s)", (RESOLVE_LOCK,)).fetchone()[0]:
+            return 0
+        try:
+            return self._resolve_quiet(now)
+        finally:
+            self.pg.execute("SELECT pg_advisory_unlock(%s)", (RESOLVE_LOCK,))
+
+    def _resolve_quiet(self, now: datetime) -> int:
         quiet = {"now": now, "grace": GRACE_S}
         cond = "status <> 'resolved' AND last_received_at < %(now)s - make_interval(secs => window_s + %(grace)s)"
         rows = self.pg.execute(f"SELECT id, alert_key FROM alerts WHERE {cond}", quiet).fetchall()

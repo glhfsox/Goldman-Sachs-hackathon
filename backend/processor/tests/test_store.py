@@ -1,4 +1,5 @@
 import dataclasses
+import random
 import threading
 from datetime import UTC, datetime, timedelta
 
@@ -7,7 +8,7 @@ import pytest
 
 from conftest import PAYLOADS, make_event
 from processor import build_envelope, match_rules
-from processor.store import DIRTY, GRACE_S, Item, Store
+from processor.store import DIRTY, FLUSH_LOCK, GRACE_S, RESOLVE_LOCK, Item, Store
 from processor.store import _hash_key as store_hash
 
 T0 = datetime(2026, 11, 20, 10, 15, 2, 123000, tzinfo=UTC)
@@ -112,6 +113,99 @@ def test_two_replicas_race_on_a_new_key(new_store, batch, sql):
     stores[0].flush()
     assert sql("SELECT count FROM alerts") == [{"count": 100}]
     assert len(changes(sql, "opened")) == 1
+
+
+def race(stores, work) -> list:
+    """Run work(store, i) for every store in its own thread, started together; return what they raised."""
+    barrier, errors = threading.Barrier(len(stores)), []
+
+    def run(store, i):
+        barrier.wait()
+        try:
+            work(store, i)
+        except Exception as e:
+            errors.append(e)
+    threads = [threading.Thread(target=run, args=(s, i)) for i, s in enumerate(stores)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return errors
+
+
+def pricing(ns, offset, partition=0, at=0.0):
+    """One event per instrument I<n>, in the order given; offsets offset+n."""
+    return lambda batch: [it for n in ns for it in batch("pricing", [offset + n], partition=partition, at=at, instrument=f"I{n:03}")]
+
+
+def test_two_replicas_race_on_many_overlapping_new_keys(new_store, batch, sql):
+    def work(store, p):
+        rng = random.Random(p)
+        for rnd in range(10):  # each batch: 40 keys, 20 shared with the previous batch, shuffled differently per replica
+            ns = list(range(rnd * 20, rnd * 20 + 40))
+            rng.shuffle(ns)
+            store.process(pricing(ns, rnd * 1000, partition=p)(batch))
+
+    stores = [new_store(), new_store()]
+    assert race(stores, work) == []
+    stores[0].flush()
+    assert sql("SELECT count(*) AS n, count(DISTINCT alert_key) AS k, sum(count) AS events FROM alerts WHERE status = 'open'") == [
+        {"n": 220, "k": 220, "events": 2 * 10 * 40}]
+    assert len(changes(sql, "opened")) == 220 and changes(sql, "reopened") == []
+
+
+def test_two_replicas_race_to_reopen_many_keys(new_store, new_redis, batch, sql):
+    s0 = new_store()
+    s0.process(pricing(range(60), 0)(batch))
+    s0.flush()
+    resolve_all(sql)
+    new_redis().flushall()  # every key takes the miss path
+
+    def work(store, p):
+        ns = list(range(60))
+        random.Random(p).shuffle(ns)
+        store.process(pricing(ns, 100, partition=p + 1, at=5)(batch))
+
+    stores = [new_store(), new_store()]
+    assert race(stores, work) == []
+    stores[0].flush()
+    assert sql("SELECT count(*) AS n, sum(count) AS events FROM alerts WHERE status = 'open'") == [{"n": 60, "events": 180}]
+    assert sql("SELECT count(*) AS n FROM alerts") == [{"n": 60}]
+    assert len(changes(sql, "reopened")) == 60
+
+
+def test_timed_flush_skips_while_another_replica_holds_the_lock(new_store, db, batch, sql):
+    store = new_store()
+    store.process(batch("workflow", range(5)))
+    with psycopg.connect(db, autocommit=True) as other, other.transaction():
+        other.execute("SELECT pg_advisory_xact_lock(%s)", (FLUSH_LOCK,))
+        store.flush()
+        assert sql("SELECT count FROM alerts") == [{"count": 1}]
+        store.flush([batch("workflow", [0])[0].match.alert_key])  # targeted flushes never wait for the tick
+        assert sql("SELECT count FROM alerts") == [{"count": 5}]
+    store.process(batch("workflow", range(5, 7)))
+    store.flush()
+    assert sql("SELECT count FROM alerts") == [{"count": 7}]
+
+
+def test_timed_flush_dying_after_its_redis_step_keeps_the_counts_and_releases_the_lock(new_store, batch, sql):
+    store = new_store()
+    store.process(batch("workflow", range(5)))
+    orig, calls = store._exec, []
+
+    def exec_(fill):
+        calls.append(1)
+        out = orig(fill)
+        if len(calls) == 2:  # dies right after the Redis step (publish, undirty) of the flush
+            raise Crash
+        return out
+    store._exec = exec_
+    with pytest.raises(Crash):
+        store.flush()
+    new_store().flush()
+    assert sql("SELECT count FROM alerts") == [{"count": 5}]  # the marks were cleared only after the commit
+    assert sql("SELECT pg_try_advisory_lock(%s) AS ok", FLUSH_LOCK) == [{"ok": True}]  # released by the crashed flush
+    sql("SELECT pg_advisory_unlock(%s) AS ok", FLUSH_LOCK)
 
 
 def test_redis_wiped_mid_stream_continues_the_alert(new_store, new_redis, batch, sql):
@@ -375,9 +469,10 @@ def test_concurrent_flushes_emit_one_threshold(new_store, batch, sql):
 
     def run(store):
         try:
-            store.flush()
+            store.flush(keys)  # targeted: timed flushes take turns on FLUSH_LOCK, these race on the row lock
         except Exception as e:
             errors.append(e)
+    keys = [batch("workflow", [0])[0].match.alert_key]
     for s in stores:
         s._change = change_after_both_read
     threads = [threading.Thread(target=run, args=(s,)) for s in stores]
@@ -488,7 +583,10 @@ def test_two_replicas_resolving_at_once_emit_one_record(new_store, new_redis, ba
 
         def exec_(fill):
             out = orig(fill)
-            barrier.wait(5)  # both replicas have their candidates before either updates
+            try:
+                barrier.wait(0.5)  # with RESOLVE_LOCK the other replica skipped its tick, so this times out
+            except threading.BrokenBarrierError:
+                pass
             return out
         store._exec = exec_
 
@@ -505,6 +603,20 @@ def test_two_replicas_resolving_at_once_emit_one_record(new_store, new_redis, ba
     for t in threads:
         t.join()
     assert errors == [] and sorted(done) == [0, 1]
+    assert len(changes(sql, "resolved")) == 1
+
+
+def test_resolve_tick_skips_while_another_replica_holds_the_lock(new_store, new_redis, db, batch, sql):
+    store, items = new_store(), batch("workflow", range(3))
+    store.process(items)
+    store.flush()
+    expire(new_redis(), items)
+    with psycopg.connect(db, autocommit=True) as other:
+        other.execute("SELECT pg_advisory_lock(%s)", (RESOLVE_LOCK,))
+        assert store.resolve_quiet(after(400)) == 0
+        assert sql("SELECT status FROM alerts") == [{"status": "open"}]
+        other.execute("SELECT pg_advisory_unlock(%s)", (RESOLVE_LOCK,))
+    assert store.resolve_quiet(after(400)) == 1
     assert len(changes(sql, "resolved")) == 1
 
 

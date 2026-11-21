@@ -66,5 +66,9 @@ Known: new alerts are opened per Kafka batch in one transaction with a fixed num
 new alert costs 0.15 ms in all (6,618/s) instead of 0.48 ms; about two thirds of that is Postgres writing the row,
 its three indexes and the outbox row, which is now the limit of all-distinct traffic. The 2 to 4 s delay seen before came from two things, both fixed:
 the relay published at most 500 outbox rows per step, so a burst of `count_threshold` records held up newer
-`opened` records, and `load.py` sent every new key in the first second. With 6 workers at 10,000/s the p99
-is higher than with 1 (not investigated; only 3 workers get traffic and all share the Mac's CPUs).
+`opened` records, and `load.py` sent every new key in the first second. With 6 workers at 10,000/s
+every worker flushed the same dirty alerts and auto-resolved the same quiet ones, queueing on each other's row
+locks; now one worker at a time does each (advisory locks) and no lock waits are left. The tail remains and is
+not explained: p99 204, 534, 3,266, 234 and 1,435 ms in runs without auto-resolve, 3,620 ms in a run during which
+6,792 alerts auto-resolved. The profiler then shows the relay sending outbox rows (the `resolved` records go
+out ahead of newer `opened` ones) and WAL writes on commit, not locks.

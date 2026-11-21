@@ -20,7 +20,7 @@ from .config import Config
 from .core import TS_MAX, TS_MIN, build_envelope, match_rules
 from .relay import MESSAGE_TIMEOUT_MS, Relay
 from .store import TOPIC as CHANGES_TOPIC
-from .store import Item, Store
+from .store import DIRTY, Item, Store
 
 log = logging.getLogger("processor")
 RAW_TOPIC, CONFIG_TOPIC = "events.raw", "config.changes"
@@ -296,7 +296,7 @@ def _run(brokers: str, db_url: str, redis_url: str) -> None:
     log.info("processor started")
     while not stop:
         proc.step()
-    store.flush()
+    store.flush(r.zrange(DIRTY, 0, -1))  # targeted, not the timed tick: a replica stopping at the same time holds the tick's lock
     relay.drain()
     consumer.close()
     config_consumer.close()

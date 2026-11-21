@@ -34,7 +34,8 @@ The [Alert object](../api.md) plus six internal columns that never leave the ser
 
 - Unique index on `alert_key` where `status <> 'resolved'`: at most one live alert per key. This index,
   not Redis, decides whether an alert exists.
-- Index on (`alert_key`, `last_received_at` desc) for the reopen lookup.
+- Index on `alert_key` for the reopen lookup. No index contains a column a count flush changes (`count`,
+  `last_seen`, `last_received_at`, `severity`), so those updates stay HOT; `fillfactor` 70 leaves room for them.
 - `status`, `acked_by` and `resolved_by` also change when the processor applies an `acked` or `resolved`
   record that the api published to `alerts.changes`.
 - Auto-resolve: every few seconds the processor sets `status = 'resolved'`, `resolved_by = 'auto'` on
