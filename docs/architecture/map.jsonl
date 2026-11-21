@@ -16,6 +16,7 @@
 {"id":"api_db","kind":"store","area":"infra","purpose":"API's own Postgres: all configuration, runbooks, timeline, action runs, proposals, and a read copy of alerts"}
 {"id":"ai_worker_db","kind":"store","area":"infra","purpose":"AI worker's own Postgres: its job queue, its alert history (one row per alert) and its copy of finished runbook runs"}
 {"id":"api","kind":"service","area":"backend","purpose":"REST and WebSocket for the UI: owns configuration, ack and resolve, timeline, runbook lookup, action runner with approval"}
+{"id":"mock_target","kind":"service","area":"backend","files":["backend/mock-target/","backend/mock-target/src/MockTarget/Program.cs"],"in":["runbook action calls"],"out":["call log"],"purpose":"Mock of the systems runbook actions act on: answers any path, logs calls with their Idempotency-Key, can be told to fail","symbols":["/_fail"]}
 {"id":"web_ui","kind":"ui","area":"frontend","purpose":"Live alert feed, alert card with runbook and timeline, rule editor, channel preferences"}
 {"id":"ai_worker","kind":"service","area":"backend","purpose":"Off the event path: writes schema mappings, converts and proposes runbooks, proposes rule severities and run start modes, risk-checks automatic runbook runs"}
 {"id":"claude_api","kind":"external","purpose":"LLM API called by the AI worker only, never per event"}
@@ -51,6 +52,7 @@
 {"from":"redis","to":"api","data":"ui.alerts"}
 {"from":"api","to":"api_db","data":"config, timeline, action runs, alert copy"}
 {"from":"api","to":"web_ui","data":"REST, WebSocket"}
+{"from":"api","to":"mock_target","data":"runbook actions (HTTP, Idempotency-Key)"}
 {"from":"web_ui","to":"api","data":"user actions"}
 {"from":"ai_worker","to":"ai_worker_db","data":"jobs, alert history, run history, Claude job checkpoints"}
 {"from":"ai_worker","to":"api","data":"mappings, canonical runbooks, proposals, run risk checks (REST)"}

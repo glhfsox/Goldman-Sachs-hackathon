@@ -191,6 +191,7 @@ flowchart TB
     n_processor("<b>processor</b><br/><small>service</small>")
     n_notifier("<b>notifier</b><br/><small>service</small>")
     n_api("<b>api</b><br/><small>service</small>")
+    n_mock_target("<b>mock_target</b><br/><small>service</small>")
     n_ai_worker("<b>ai_worker</b><br/><small>service</small>")
   end
   subgraph a_frontend ["frontend"]
@@ -226,8 +227,9 @@ flowchart TB
   n_redis -- "ui.alerts" --> n_api
   n_api -- "config, timeline, action runs, alert copy" --> n_api_db
   n_api -- "REST, WebSocket" --> n_web_ui
+  n_api -- "runbook actions (HTTP, Idempotency-Key)" --> n_mock_target
   n_web_ui -- "user actions" --> n_api
-  n_ai_worker -- "jobs, alert history, run history" --> n_ai_worker_db
+  n_ai_worker -- "jobs, alert history, run history, Claude job checkpoints" --> n_ai_worker_db
   n_ai_worker -- "mappings, canonical runbooks, proposals, run risk checks (REST)" --> n_api
   n_ai_worker -- "sample payload, runbook text, alert timeline" --> n_claude_api
   n_ai_worker -- "rule, alert summary, reaction and run stats, run actions with filled params" --> n_typesafe_api
@@ -236,7 +238,7 @@ flowchart TB
   classDef k1 fill:#dcfce7,stroke:#16a34a,color:#111827
   class n_source_kafka,n_events_raw,n_alerts_changes,n_config_changes,n_alerts_timeline,n_schema_samples k1
   classDef k2 fill:#fef3c7,stroke:#d97706,color:#111827
-  class n_ingest,n_processor,n_notifier,n_api,n_ai_worker k2
+  class n_ingest,n_processor,n_notifier,n_api,n_mock_target,n_ai_worker k2
   classDef k3 fill:#fce7f3,stroke:#db2777,color:#111827
   class n_redis,n_ingest_db,n_processor_db,n_notifier_db,n_api_db,n_ai_worker_db k3
   classDef k4 fill:#ede9fe,stroke:#7c3aed,color:#111827
