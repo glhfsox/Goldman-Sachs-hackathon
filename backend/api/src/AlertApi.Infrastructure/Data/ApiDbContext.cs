@@ -38,6 +38,8 @@ public class ApiDbContext : DbContext, IUnitOfWork
 
     public DbSet<Runbook> Runbooks => Set<Runbook>();
 
+    public DbSet<Proposal> Proposals => Set<Proposal>();
+
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
