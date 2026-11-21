@@ -105,6 +105,8 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
 - `route.channels`: any of `ui`, `email`, `sms`, `call`. When omitted, each recipient's own preferences
   decide. Quiet hours and the per-hour limit from preferences always apply.
 - `present.color`: `red`, `orange`, `yellow`, `blue` or `grey`. Templates use `{{path}}`.
+- `present` is optional. A rule without `present.title` gets its `name` as the alert title, or
+  `{{type}} · {{service}}` when it has no name, so no channel ever shows a blank title.
 - A person matched by several rules for one incident gets one message.
 - An invalid rule is rejected by the API with `422` and never reaches the processor (see [api.md](api.md)).
 - The processor reloads rules and mappings within 5 s of a change (they arrive on Kafka `config.changes`,
