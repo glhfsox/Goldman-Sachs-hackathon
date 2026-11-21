@@ -1,3 +1,5 @@
+> **Presentation:** [presentation/alpin-deck.pdf](presentation/alpin-deck.pdf)
+
 # Flexible Alerting & Notification Service
 
 ![throughput](https://img.shields.io/badge/throughput-8k_events%2Fs-2ea44f)
@@ -56,7 +58,6 @@ replicas, Kafka partitions are the unit of scale. Claude runs once per new schem
 ## Run it
 
 ```bash
-printf 'ANTHROPIC_API_KEY=...\nTYPESAFE_API_KEY=...\n' > .env    # optional: the AI worker
 docker compose up -d --build                                    # the whole system, seeded
 (cd data/simulator && bash check.sh && .venv/bin/sim run demo)  # a scripted bad morning, 3.5 min
 ```
