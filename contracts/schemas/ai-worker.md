@@ -45,8 +45,8 @@ job, `thread_id` = `jobs.id`. Created and migrated by `langgraph-checkpoint-post
 its own versions in `checkpoint_migrations`), which the worker runs at start under the same advisory lock as
 `migrations/`; their columns are that library's (`langgraph-checkpoint-postgres` 3.2.1:
 thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint jsonb, metadata jsonb; blobs and writes as
-bytea). A job that resumes reads its thread; the rows of a job are deleted when the job ends `done` or `failed`, so
-only `pending` jobs have any. Nothing else reads them.
+bytea). A job that resumes reads its thread; the rows of a job are normally deleted when the job ends `done` or
+`failed` (a crash between the two leaves a few rows that nothing reads). Nothing else reads them.
 
 ### `alert_history`
 
