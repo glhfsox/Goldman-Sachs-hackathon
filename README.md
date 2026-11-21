@@ -1,174 +1,100 @@
 # Flexible Alerting & Notification Service
 
-Takes errors, metric alerts and business events from any system, in any format, and turns them into
-one clear alert for the people who own the problem, on the channel each of them prefers. Every alert
-comes with the team's runbook, filled in with values from the event, and the runbook's steps can be
-run from the UI.
+![throughput](https://img.shields.io/badge/throughput-8k_events%2Fs-2ea44f)
+![latency](https://img.shields.io/badge/ingest→UI_p99-150_ms_at_3k%2Fs-1f6feb)
+![lost](https://img.shields.io/badge/events_lost-0-2ea44f)
+![llm](https://img.shields.io/badge/LLM_calls_per_event-0-8250df)
 
-Built for Hackathon 2026 (Software Engineering track).
+Errors, metric alerts and business events from any system, in any format, become **one alert** for the people who
+own the problem, on **the channel each of them prefers**, with **the team's runbook** filled in and runnable.
 
-## What it does
-
-- **Ingests from Kafka and HTTP webhooks.** No fixed event format: each schema gets a mapping to a
-  common envelope. A schema we have never seen shows up at once as "unmapped"; an AI worker writes
-  its mapping in the background, and the waiting events are then processed as normal ones.
-- **Rules per team.** Filters on any field, including values inside the payload
-  (`notional > 10000000`, `error.code in [TIMEOUT, REJECTED]`), combined with AND/OR. Each rule sets
-  who is notified, on which channel, and how the alert looks. Rules change at runtime, no restart.
-- **No floods.** The same error 500 times a minute is one alert with a counter. Alerts are grouped per
-  rule window, and alerts caused by the same upstream failure are linked into one incident.
-- **Delivery that survives failures.** Email, SMS, phone call and the UI. Personal preferences
-  (critical → call + SMS, warning → email), working hours, escalation and digests. Sends are retried
-  with backoff and fall back to another channel; nothing is lost when a channel is down.
-- **Runbooks you can run.** Attach a runbook in any shape (YAML steps, Markdown, a wiki link, free
-  text). It is converted once to a structured form, and its steps can be actions: retry a workflow,
-  restart a service, call a webhook, escalate. Risky actions wait for a person to approve them. Every
-  step is recorded on the alert's timeline.
-- **Live UI.** A real-time feed per team, ack and resolve, rule and preference editors, and proposals
-  the system makes from past incidents (a new runbook, a different severity) for the owner to accept.
+| | |
+|---|---|
+| 🔌 **Any source, any schema** | Kafka and HTTP. A never-seen schema shows up at once; Claude writes its mapping in the background and the waiting events replay. |
+| 🎯 **Rules per team** | Any field, payload values included (`notional > 10000000`), AND/OR. Routing, channels and look per rule. Changed live. |
+| 🔇 **No floods** | 500 identical errors a minute = one alert with a counter. Grouping per rule window. |
+| 📨 **Delivery that survives** | UI, email, SMS, call. Personal preferences, quiet hours, escalation, digests. Retries, backoff, fallback channel. |
+| 🛠 **Runbooks you can run** | YAML, Markdown, a link or free text → steps with actions (retry, restart, webhook, escalate). Risky steps wait for a person. |
+| ⚖️ **AI that only proposes** | Jev judges check every automatic run and propose severities and start modes from how people reacted; a person accepts. |
 
 ## Architecture
 
-Five services on one internal Kafka cluster and Redis, plus a mock target that runbook actions call.
-Each service has its own Postgres and is the only one that touches it; data moves between services
-only as Kafka records or REST calls.
-
 ```mermaid
 flowchart LR
-  src["Sources<br/>Kafka · HTTP"] --> ingest["Ingest<br/>stamp id and time"]
-  ingest --> raw{{events.raw}}
+  S([Sources<br/>Kafka · HTTP]) --> I[Ingest] --> R{{events.raw}} --> P[Processor<br/>map · rules · dedup · state] --> C{{alerts.changes}} --> N[Notifier<br/>policy · retry · fallback] --> CH([Email · SMS · Call])
+  C --> A[API<br/>REST · WebSocket] <--> U([Web UI])
+  P -.->|new schema| W[AI worker<br/>Claude · Jev] -.->|"mappings · runbooks · proposals"| A
+  A -.->|config.changes| P
+  A -->|runbook actions| T([Systems<br/>mock target])
 
-  subgraph Processor
-    direction LR
-    map["Map schema"] --> rules["Match rules"] --> dedup["Dedup and group"] --> state["Alert state"]
-  end
-  raw --> map
-  state --> changes{{alerts.changes}}
-
-  subgraph Notifier
-    direction LR
-    policy["Who, when,<br/>which channel"] --> send["Send, retry,<br/>fallback"]
-  end
-  changes --> policy
-  send --> channels["Email · SMS · Call"]
-
-  changes --> api["API"] <-->|WebSocket| ui["Web UI"]
-  map -. "unknown schema" .-> ai["AI worker<br/>+ Claude"] -. "new mapping" .-> api
-  api -. "rules, mappings, preferences" .-> Processor
-  api -- "runbook actions" --> target["Mock target<br/>workflows · services"]
+  classDef svc fill:#fef3c7,stroke:#d97706,color:#111
+  classDef topic fill:#dcfce7,stroke:#16a34a,color:#111
+  classDef ext fill:#dbeafe,stroke:#2563eb,color:#111
+  classDef ai fill:#ede9fe,stroke:#7c3aed,color:#111
+  class I,P,N,A svc
+  class R,C topic
+  class S,CH,U,T ext
+  class W ai
 ```
 
-| Service | Job |
-|---|---|
-| Ingest | Receives events (HTTP and the sources Kafka cluster), stamps an id and receive time, writes them to `events.raw`. Answers the sender only after Kafka has the event. |
-| Processor | Applies the schema mapping, evaluates rules, deduplicates and groups, links incidents. Owns alert state and auto-resolves alerts that went quiet. |
-| Notifier | Decides who is told, when and on which channel; sends with retries and fallback; runs escalations and digests. |
-| API | REST and WebSocket for the UI. Owns all configuration (rules, mappings, teams, preferences, runbooks) and the alert timeline; runs runbook actions behind an approval gate. |
-| AI worker | Off the event path. Writes mappings for new schemas, converts uploaded runbooks, proposes runbooks from resolved incidents. Every result is checked by code before it is saved. |
-| Mock target | Stands in for the systems runbook actions act on (workflow engine, services, ticketing, escalation). Answers any call and logs it; a repeated `Idempotency-Key` gets the first answer again, and `POST /_fail` makes the next calls fail. A real system replaces it with one action-target config change, no code. |
+Five stateless services on one Kafka cluster and Redis, **one Postgres each** (no shared tables); each runs in several
+replicas, Kafka partitions are the unit of scale. Claude runs once per new schema and per runbook, never per event.
 
-There is no LLM call per event: Claude is used once per new schema and once per runbook, so the event
-path runs at Kafka speed. Every service is stateless and runs in several replicas; Kafka partitions
-are the unit of scale.
+| Service | Owns |
+|---|---|
+| **Ingest** | Receive, stamp id and time, write to `events.raw`; ack the sender only after Kafka has it |
+| **Processor** | Mapping, rules, dedup, grouping, alert state, auto-resolve |
+| **Notifier** | Who, when, which channel; send with retry and fallback; escalation and digests |
+| **API** | REST + WebSocket for the UI, all configuration, timeline, runbook runs behind an approval gate |
+| **AI worker** | Off the event path: mappings, runbook conversion, proposals, risk checks; every result checked by code |
 
 ## Run it
 
-You need Docker with Compose v2.
-
 ```bash
-unzip alerting.zip && cd alerting
-cp .env.example .env          # optional: put your ANTHROPIC_API_KEY here
-docker compose up -d --build  # first build takes a few minutes
+printf 'ANTHROPIC_API_KEY=...\nTYPESAFE_API_KEY=...\n' > .env    # optional: the AI worker
+docker compose up -d --build                                    # the whole system, seeded
+(cd data/simulator && bash check.sh && .venv/bin/sim run demo)  # a scripted bad morning, 3.5 min
 ```
 
-Without an Anthropic key everything works except mapping unseen schemas and converting runbooks.
-
-Then play the demo, a scripted bad morning at a fictional bank (about 3.5 minutes,
-[story](data/README.md)):
-
-```bash
-docker compose run --rm simulator run demo
-```
-
-| Open | What you see |
+| Open | |
 |---|---|
-| http://localhost:3000 | The UI: pick a user at the top, watch the live feed |
-| http://localhost:8025 | Emails (MailHog) |
-| http://localhost:8002 | SMS and phone calls the mock gateway received |
-| http://localhost:8003/_calls | Runbook actions the mock target received |
-| http://localhost:8000/swagger | API |
-| http://localhost:8001/swagger | Ingest: send your own event with `POST /ingest/{source_id}` |
+| [localhost:3000](http://localhost:3000) | **The UI**: pick a user, watch the live feed |
+| [:8025](http://localhost:8025) · [:8002](http://localhost:8002) · [:8003/_calls](http://localhost:8003/_calls) | Emails · SMS and calls · runbook actions received |
+| [:8000/swagger](http://localhost:8000/swagger) · [:8001/swagger](http://localhost:8001/swagger) | API · Ingest |
 
-Stop with `docker compose down`; add `-v` to delete all data.
+Any JSON is an event: `curl -X POST localhost:8001/ingest/alertmanager-http -d '{"alertname":"HighErrorRate", ...}'`.
+Without the keys everything works except new-schema mapping, runbook conversion and the judges.
 
-### Send your own event
+## Measured
 
-```bash
-curl -X POST http://localhost:8001/ingest/alertmanager-http \
-  -d '{"alertname":"HighErrorRate","labels":{"service":"payments-api","severity":"critical"},
-       "annotations":{"summary":"Error rate 12%"},"status":"firing"}'
-```
+One Mac (Apple Silicon, Docker Desktop), 120 s of simulator load plus 100 probe alerts routed to UI, email and SMS.
 
-Any JSON works. An unknown shape appears in the UI as unmapped and gets a mapping within about
-15 seconds (needs the Anthropic key).
-
-## Measured performance
-
-Two runs on 21-11 (one Mac, Apple Silicon, every service in Docker Desktop, so all clocks are the same clock).
-Background load from the sources simulator for 120 s (90% Kafka, 10% HTTP), plus 100 probe events over HTTP, each
-opening its own alert routed to UI, email and SMS. Full reports:
-[3,000 msg/s](docs/evaluation/20261121065848.md), [9,000 msg/s](docs/evaluation/20261121070611.md),
-[9,000 msg/s with 3 processors and 3 notifiers](docs/evaluation/20261121071509.md) (`docker compose up -d --scale processor=3 --scale notifier=3`).
-
-| Metric | 3,000 msg/s asked | 9,000 msg/s asked | 9,000 msg/s asked, 3 processors + 3 notifiers |
+| | 3k msg/s | 9k msg/s asked | 9k asked, 3 processors + 3 notifiers |
 |---|---|---|---|
-| Sent by the simulator / failed | 354,780 / 0 | 1,011,682 / 0 (3 processes, about 8,200 msg/s: the generator on the same machine is the limit) | 897,276 / 0 (about 6,850 msg/s: the extra containers took CPU from the generator) |
-| Ingested (`events.raw`), sustained | 2,955 events/s | 7,991 events/s | 6,426 events/s |
-| Processed (rules, dedup, alert state), sustained | 2,955 events/s | 7,991 events/s | 6,426 events/s |
-| Processor lag at the end of the load / time to drain | 27 events / 1.0 s | 0 events / 0.5 s | 0 events / 0.7 s |
-| Probes lost | 0 of 100 | 0 of 100 | 0 of 100 |
-| Ingest → alert visible in the UI (WebSocket), p50 / p95 / p99 | 82 / 133 / 150 ms | 93 / 296 / 463 ms | 94 / 217 / 249 ms |
-| Ingest → email sent (MailHog), p50 / p95 / p99 | 84 / 138 / 159 ms | 96 / 298 / 466 ms | 99 / 236 / 293 ms |
-| Ingest → SMS sent (mock gateway), p50 / p95 / p99 | 87 / 135 / 154 ms | 96 / 298 / 464 ms | 101 / 230 / 257 ms |
+| Ingested = processed, sustained | 2,955 /s | **7,991 /s** | 6,426 /s |
+| Lag left at the end · probes lost | 27 · 0 | 0 · 0 | 0 · 0 |
+| Ingest → UI p50 / p95 / p99 | **82 / 133 / 150 ms** | 93 / 296 / 463 ms | 94 / 217 / 249 ms |
+| Ingest → email p50 / p99 | 84 / 159 ms | 96 / 466 ms | 99 / 293 ms |
+| Ingest → SMS p50 / p99 | 87 / 154 ms | 96 / 464 ms | 101 / 257 ms |
 
-The processor kept up with everything that was sent in every run (no lag left), so the ceiling is above 8,000
-events/s on this machine; a second load machine is needed to find it. Three processor replicas (two of the six
-`events.raw` partitions each) and three notifiers cut the tail: ingest → UI p99 from 463 to 249 ms. Ingest stays one
-instance: it is bound to host port 8001. Background events deduplicate into alerts that
-are already open, so they open no new alerts.
+The pipeline kept up with everything sent; the load generator on the same machine was the limit (about 8,200 msg/s).
+Replicas cut the tail by half. Reports: [docs/evaluation/](docs/evaluation/).
 
-The judges of the AI worker (TypeSafe Jev), on labelled cases (labels written with AI help, not yet reviewed):
-
-| Judge | Right | Dangerous misses |
+| Jev judge | Right | Dangerous misses |
 |---|---|---|
-| Run risk check (`auto` run starts by itself or waits for a person) | 25 of 30 (83%) | 0 (no risky run cleared) |
-| Run start mode proposal (`auto` / `approval`) | 15 of 16 (94%) | 0 (no `auto` proposed where it should not be) |
-| Rule severity proposal (lowers noisy rules, raises ones people rush to) | 16 of 20 (80%), the same on 3 repeats | 0 (never proposed a lower severity than it should) |
+| Risk check before an automatic run | 25 / 30 | 0 |
+| Start mode proposal | 15 / 16 | 0 |
+| Severity proposal (lowers noisy rules) | 16 / 20 | 0 |
 
-Reproduce, with the stack up: `bash data/simulator/check.sh` once, then
-`set -a; . backend/ai-worker/.env; set +a; uv run scripts/evaluate.py --rate 9000 --duration 120 --probes 100`
-(`--skip-jev` without a TypeSafe key). It writes `docs/evaluation/<time>.md` and `.json`.
+Reproduce: `uv run scripts/evaluate.py --rate 9000 --duration 120 --probes 100` (stack up, keys in the environment).
 
 ## What is mocked
 
-| Real thing | Here |
-|---|---|
-| Email provider | MailHog |
-| SMS and phone provider | A gateway that logs each delivery with a timestamp |
-| Systems runbook actions act on | The mock target (`backend/mock-target`): logs every call, can be told to fail |
-| Event sources | A simulator that sends the brief's sample events over Kafka and HTTP |
-| Login | None: the UI has a user picker |
-
-A real provider replaces a mock by implementing one channel adapter in the Notifier.
+Email → MailHog · SMS and calls → a logging gateway · systems runbook actions touch → `backend/mock-target` ·
+event sources → `data/simulator` · login → a user picker. A real provider is one channel adapter in the Notifier;
+a real system is one action-target config entry.
 
 ## Repository
 
-| Folder | Contents |
-|---|---|
-| `backend/ingest`, `processor`, `notifier`, `api`, `ai-worker` | The five services, each with its own README |
-| `backend/mock-target` | The mock system runbook actions call |
-| `backend/kafka` | The internal Kafka cluster and its topics |
-| `frontend/` | Web UI |
-| `data/` | Sources Kafka cluster and the event simulator |
-| `contracts/` | Interfaces between services |
-| `presentation/` | Slides and demo material |
+`backend/` the five services and the mock target, each with a README · `frontend/` web UI · `data/` sources and
+simulator · `contracts/` interfaces between services · `docs/` architecture map and evaluation reports.
