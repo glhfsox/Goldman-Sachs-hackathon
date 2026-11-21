@@ -31,8 +31,8 @@ public sealed class KafkaRawEventPublisher : IRawEventPublisher, IDisposable
     {
         var message = new Message<string, string>
         {
-            // The key keeps one source's events in order inside a partition.
-            Key = rawEvent.SourceId,
+            // Keyed by event_id so one busy source spreads over all partitions and processor workers; the processor does not need per-source order.
+            Key = rawEvent.EventId.ToString(),
             Value = RawEventSerializer.Serialize(rawEvent)
         };
 
