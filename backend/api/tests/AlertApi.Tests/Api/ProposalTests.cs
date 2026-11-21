@@ -197,21 +197,32 @@ public sealed class ProposalTests : IClassFixture<PostgresFixture>
     }
 
     [Fact]
-    public async Task Accept_RunbookStart_Is409UntilRunsExist_ButItCanBeRejected()
+    public async Task Accept_RunbookStart_WritesTheStartRow_AndAMissingRunbookIs409_ButItCanBeRejected()
     {
         using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
         using var client = factory.CreateClient();
         await Apply(factory, ActivityRecords.AlertChange("c-1", "opened"));
         var id = await Create(client, RunbookStart);
 
-        var accept = await Send(client, $"/api/proposals/{id}/accept", "anna", null);
-        var reject = await Send(client, $"/api/proposals/{id}/reject", "boris", null);
+        var noRunbook = await Send(client, $"/api/proposals/{id}/accept", "anna", null);
+        await Send(client, "/api/runbooks", null, """{"team_id": "settlements", "title": "Settlement timeout", "format": "markdown", "source": "1. Retry."}""");
+        var accepted = await Send(client, $"/api/proposals/{id}/accept", "anna", null);
+        var starts = await client.GetFromJsonAsync<JsonElement>("/api/runbook-starts");
 
-        Assert.Equal(HttpStatusCode.Conflict, accept.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, noRunbook.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var row = Assert.Single(starts.EnumerateArray());
+        Assert.Equal("auto", row.GetProperty("start").GetString());
+        Assert.Equal("anna", row.GetProperty("set_by").GetString());
+
+        var other = await Create(client, RunbookStart.Replace("\"auto\"", "\"approval\""));
+        var reject = await Send(client, $"/api/proposals/{other}/reject", "boris", null);
+
         Assert.Equal(HttpStatusCode.OK, reject.StatusCode);
         var body = await reject.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("rejected", body.GetProperty("status").GetString());
         Assert.Equal("boris", body.GetProperty("decided_by").GetString());
+        Assert.Equal("auto", (await client.GetFromJsonAsync<JsonElement>("/api/runbook-starts"))[0].GetProperty("start").GetString());
     }
 
     [Fact]

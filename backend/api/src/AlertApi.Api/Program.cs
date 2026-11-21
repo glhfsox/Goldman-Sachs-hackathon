@@ -81,6 +81,7 @@ builder.Services.AddSingleton(new RunExecutorOptions
 });
 builder.Services.AddScoped<IRunExecutor, RunExecutor>();
 builder.Services.AddScoped<IRunbookStartRepository, RunbookStartRepository>();
+builder.Services.AddScoped<IRunbookStartService, RunbookStartService>();
 builder.Services.AddSingleton(new RunAutomationOptions
 {
     CancelWindow = TimeSpan.FromSeconds(builder.Configuration.GetValue("RUNBOOK_CANCEL_WINDOW_S", 30))
@@ -156,6 +157,7 @@ app.MapRunbookEndpoints();
 app.MapActionEndpoints();
 app.MapRunEndpoints();
 app.MapProposalEndpoints();
+app.MapRunbookStartEndpoints();
 app.MapLiveEndpoints();
 
 app.Run();

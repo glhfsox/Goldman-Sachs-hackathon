@@ -68,8 +68,10 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `GET /proposals?status=&limit=` | | `[Proposal]`, newest first; `status` is `open`, `accepted` or `rejected`; `limit` defaults to 50, at most 200 |
 | `GET /proposals/{id}` | | `Proposal`, `404` when unknown |
 | `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal`. Only a person: `403` for `ai-worker` or an unknown `X-User`. `409` when the proposal is not `open` |
+| `GET /runbook-starts?rule=&runbook=` | | `[RunbookStart]` ordered by rule and runbook; a pair with no row starts as `approval` |
+| `PUT /runbook-starts/{rule_id}/{runbook_id}` | `{start}`: `auto` or `approval`, with `X-User` | `RunbookStart` `{rule_id, runbook_id, start, set_by, updated_at}`, created or replaced. Only a person: `403` for `ai-worker`, a service or no `X-User`. `404` for an unknown rule or runbook, `422 invalid_runbook_start` for another mode. `auto` takes effect only for an `auto`-risk run of a runbook version a person accepted ([runbooks.md](runbooks.md) §2). Not published on `config.changes` |
 
-A `Proposal` is `{id, alert_id, kind, body, author, status, decided_by, created_at, decided_at}`; `kind` is `threshold`, `template`, `runbook`, `rule_severity` or `runbook_start`. Accepting applies the proposal: `rule_severity` sets the rule's `severity` (published on `config.changes`; `409` when the rule no longer exists); `runbook` saves `body.canonical` as a new runbook that is `active` and accepted by that person, with an id made from `body.title` (the id inside `canonical` is replaced); `threshold` and `template` only change the status, a person applies them; `runbook_start` answers `409` until `runbook_starts` can be written (next change). Creating and deciding add the timeline rows `proposal_created` and `proposal_decided`.
+A `Proposal` is `{id, alert_id, kind, body, author, status, decided_by, created_at, decided_at}`; `kind` is `threshold`, `template`, `runbook`, `rule_severity` or `runbook_start`. Accepting applies the proposal: `rule_severity` sets the rule's `severity` (published on `config.changes`; `409` when the rule no longer exists); `runbook` saves `body.canonical` as a new runbook that is `active` and accepted by that person, with an id made from `body.title` (the id inside `canonical` is replaced); `threshold` and `template` only change the status, a person applies them; `runbook_start` sets the start mode of `body.runbook_id` on `body.rule_id` (the row of `GET /runbook-starts`, `set_by` = the accepting person; `409` when the rule or runbook no longer exists). Creating and deciding add the timeline rows `proposal_created` and `proposal_decided`.
 
 | `GET /actions` | | `[{name, risk, default_target, url_method, timeout_s}]`: the registered runbook actions ([runbooks.md](runbooks.md) §3) |
 | `GET /action-targets`, `GET /action-targets/{id}` | | `[ActionTarget]`, `ActionTarget` |
@@ -164,8 +166,8 @@ A proposal of kind `runbook_start` says how runs of `runbook_id` on `rule_id` sh
 `approval`. The ai-worker files it on the alert of the pair's latest finished run each time the pair's finished
 runs reach a multiple of 10, judged from its most recent finished runs (at most 50, finished in the last 30 days,
 at least 10 left), when Jev's choice differs from `current_start` (`auto` when at least half of the window's runs had `trigger: auto`)
-with confidence of at least 0.6. Accepting it changes the rule so that runs of `runbook_id` on `rule_id` start as
-`body.start` (the shape is the api's, issue #75 question 3). Example:
+with confidence of at least 0.6. Accepting it sets the pair's `runbook_starts` row to
+`body.start` (`GET /runbook-starts` returns it, so `current_start` can be read there instead of derived). Example:
 
 ```json
 {"kind": "runbook_start", "body": {"rule_id": "settlements-workflow-failed", "team_id": "settlements",
