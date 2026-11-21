@@ -26,19 +26,10 @@ jobs:
           ref: dev  # rules come from dev, where they land first, not from the PR being judged
       - run: npm install -g @anthropic-ai/claude-code
       # plain Claude Code CLI on the API key instead of claude-code-action
-      # the agent only decides (and may comment on this PR); this step merges, because an allowlisted merge
-      # command failed whenever the agent typed it slightly differently (issue #94)
+      # merge and comment are allowed only for this PR, and merge only at this exact head (--merge is for release PRs dev -> main)
       - env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          out=$(claude -p "PR #$PR in $GITHUB_REPOSITORY, head SHA $SHA. Decide." \
+          claude -p "PR #$PR in $GITHUB_REPOSITORY, head SHA $SHA. Decide and act." \
             --agent pr-merger --model sonnet --effort high \
-            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(sleep:*),Bash(gh pr comment $PR --body:*)")
-          echo "$out"
-          [ "$(printf '%s\n' "$out" | tr -d '`*\r' | sed 's/[[:space:]]*$//; /^$/d' | tail -n 1)" = "MERGE #$PR" ] || exit 0
-          # --match-head-commit: never merge a commit the gate did not run on; release PRs dev -> main get a merge commit
-          if [ "$(gh pr view "$PR" --json baseRefName -q .baseRefName)" = main ]; then
-            gh pr merge "$PR" --merge --match-head-commit "$SHA"
-          else
-            gh pr merge "$PR" --squash --delete-branch --match-head-commit "$SHA"
-          fi
+            --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(sleep:*),Bash(gh pr comment $PR --body:*),Bash(gh pr merge $PR --squash --delete-branch --match-head-commit $SHA),Bash(gh pr merge $PR --merge --match-head-commit $SHA)"
