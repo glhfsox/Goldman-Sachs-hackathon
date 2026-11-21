@@ -59,6 +59,14 @@ builder.Services.AddHostedService(provider => new SourceRegistryRefresher(
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower);
 
+// The spec and the UI are for developers: on in Development and in the local Docker run, off in production.
+var apiDocsEnabled = builder.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("ENABLE_SWAGGER");
+
+if (apiDocsEnabled)
+{
+    builder.Services.AddOpenApi();
+}
+
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -73,6 +81,12 @@ await using (var scope = app.Services.CreateAsyncScope())
 await app.Services.GetRequiredService<ISourceRegistry>().RefreshAsync();
 
 app.UseExceptionHandler();
+
+if (apiDocsEnabled)
+{
+    app.MapOpenApi();
+    app.UseSwaggerUI(options => options.SwaggerEndpoint("/openapi/v1.json", "Ingest v1"));
+}
 
 app.MapHealthEndpoints();
 app.MapIngestEndpoints();

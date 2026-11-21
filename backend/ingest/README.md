@@ -10,6 +10,18 @@ docker compose up --build        # from backend/ingest: Ingest + ingest-db + sha
 curl http://localhost:8001/health
 ```
 
+API docs (on in the compose run): spec `http://localhost:8001/openapi/v1.json`, Swagger UI `http://localhost:8001/swagger`.
+The switch is `ENABLE_SWAGGER=true` (or the Development environment); it is off by default.
+
+## Postman
+
+```bash
+./postman/run.sh                 # newman against Ingest; starts docker compose if Ingest is down
+KEEP_UP=1 ./postman/run.sh       # leave the stack running afterwards
+```
+
+The collection is `postman/ingest.postman_collection.json` (import it into Postman; variable `baseUrl`).
+
 ## Check
 
 ```bash

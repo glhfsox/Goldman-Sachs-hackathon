@@ -17,7 +17,10 @@ public static class IngestEndpoints
         group.MapPost("{sourceId}", Receive)
             .WithName(nameof(Receive))
             .WithSummary("Accepts one event (JSON or text) from an HTTP source and writes it to events.raw.")
-            .WithTags("Ingest");
+            .WithTags("Ingest")
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return app;
     }
