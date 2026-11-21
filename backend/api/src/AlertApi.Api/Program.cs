@@ -3,9 +3,12 @@ using Microsoft.EntityFrameworkCore;
 using AlertApi.Api.Endpoints;
 using AlertApi.Api.Infrastructure;
 using AlertApi.Application.Interfaces;
+using AlertApi.Application.Services;
+using AlertApi.Domain.Repositories;
 using AlertApi.Infrastructure.Data;
 using AlertApi.Infrastructure.Kafka;
 using AlertApi.Infrastructure.Outbox;
+using AlertApi.Infrastructure.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +23,10 @@ var kafkaBrokers = builder.Configuration["KAFKA_BROKERS"]
 builder.Services.AddDbContext<ApiDbContext>(options =>
     options.UseNpgsql(DatabaseUrl.ToConnectionString(databaseUrl)));
 builder.Services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<ApiDbContext>());
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<IConfigChangeOutbox, ConfigChangeOutbox>();
+builder.Services.AddScoped<ISourceRepository, SourceRepository>();
+builder.Services.AddScoped<ISourceService, SourceService>();
 builder.Services.AddSingleton<IEventPublisher>(_ => new KafkaEventPublisher(kafkaBrokers));
 builder.Services.AddHostedService(provider => new OutboxPublisher(
     provider.GetRequiredService<IServiceScopeFactory>(),
@@ -59,6 +66,7 @@ if (apiDocsEnabled)
 }
 
 app.MapHealthEndpoints();
+app.MapSourceEndpoints();
 
 app.Run();
 

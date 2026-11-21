@@ -67,7 +67,10 @@ public sealed class OutboxPublisherTests : IClassFixture<PostgresFixture>
         var provider = services.BuildServiceProvider();
 
         await using var scope = provider.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<ApiDbContext>().Database.MigrateAsync();
+        var context = scope.ServiceProvider.GetRequiredService<ApiDbContext>();
+        await context.Database.MigrateAsync();
+        // The migration queues the seeded sources; these tests count only their own rows.
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM outbox");
 
         return provider;
     }

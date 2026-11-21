@@ -55,6 +55,39 @@ namespace AlertApi.Infrastructure.Migrations
 
                     b.ToTable("outbox", (string)null);
                 });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.Source", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Config")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("config");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("PK_sources");
+
+                    b.ToTable("sources", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_sources_kind", "kind IN ('http', 'kafka')");
+                        });
+                });
 #pragma warning restore 612, 618
         }
     }

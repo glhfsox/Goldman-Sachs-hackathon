@@ -2,7 +2,7 @@
 
 Base URL `http://localhost:8000/api`. JSON in and out. No auth in the PoC: every request carries
 `X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log.
-Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status.
+Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status; the api sends them as `application/problem+json`, so `title`, `status` and `detail` are there too. Codes: `not_found` (404), `conflict` (409), `invalid_<thing>` (422).
 
 ## Alert object
 
@@ -46,7 +46,8 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule` |
 | `GET /mappings`, `PUT /mappings/{id}` | `Mapping` | `Mapping`, or `422 invalid_mapping` |
 | `GET /schema-samples?status=` | | unmapped schemas waiting for a mapping |
-| `GET /sources`, `POST /sources` | `{id, kind, config}` | `Source` |
+| `GET /sources`, `GET /sources/{id}`, `POST /sources` | `{id, kind, config}` | `Source`. `id`: lowercase letters, digits, `-`; a `kafka` source needs `config.topic`; `422 invalid_source` otherwise, `409 conflict` for a taken id |
+| `PUT /sources/{id}` | `{kind, config, enabled}` | `Source` (also how a source is disabled) |
 | `GET /teams`, `GET /users` | | lists for pickers; a team includes `members` and who is on call |
 | `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` | `Preferences` |
 | `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` until converted and activated) |

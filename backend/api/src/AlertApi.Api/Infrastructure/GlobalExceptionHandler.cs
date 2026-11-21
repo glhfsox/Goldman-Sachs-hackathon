@@ -33,6 +33,13 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 Title = appException.Title,
                 Detail = appException.Details
             };
+
+            // The UI reads {"error", "message", "details"} (contracts/api.md); ProblemDetails carries them as extensions.
+            problem.Extensions["error"] = appException.Code;
+            problem.Extensions["message"] = appException.Details;
+            problem.Extensions["details"] = appException.Problems
+                .Select(item => new { path = item.Path, message = item.Message })
+                .ToList();
         }
         else
         {
