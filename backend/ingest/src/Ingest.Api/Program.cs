@@ -5,6 +5,7 @@ using Ingest.Api.Infrastructure;
 using Ingest.Application.Interfaces;
 using Ingest.Application.Services;
 using Ingest.Domain.Repositories;
+using Ingest.Infrastructure.Adapters;
 using Ingest.Infrastructure.Data;
 using Ingest.Infrastructure.Kafka;
 using Ingest.Infrastructure.Registry;
@@ -27,6 +28,10 @@ var kafkaBrokers = builder.Configuration["KAFKA_BROKERS"]
     ?? throw new InvalidOperationException(
         "KAFKA_BROKERS is not set. Set it to the internal cluster, for example kafka:9092 (see backend/ingest/.env.example).");
 
+var sourceKafkaBrokers = builder.Configuration["SOURCE_KAFKA_BROKERS"]
+    ?? throw new InvalidOperationException(
+        "SOURCE_KAFKA_BROKERS is not set. Set it to the sources cluster, for example kafka-sources:9092 (see backend/ingest/.env.example).");
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IRawEventPublisher>(_ => new KafkaRawEventPublisher(kafkaBrokers));
 builder.Services.AddScoped<IIngestService, IngestService>();
@@ -35,6 +40,16 @@ builder.Services.AddHostedService(provider => new ConfigChangesConsumer(
     provider.GetRequiredService<IServiceScopeFactory>(),
     kafkaBrokers,
     provider.GetRequiredService<ILogger<ConfigChangesConsumer>>()));
+builder.Services.AddHostedService(provider => new KafkaSourceManager(
+    provider.GetRequiredService<ISourceRegistry>(),
+    brokers => new KafkaSourceAdapter(
+        brokers,
+        provider.GetRequiredService<IRawEventPublisher>(),
+        provider.GetRequiredService<TimeProvider>(),
+        provider.GetRequiredService<ILogger<KafkaSourceAdapter>>()),
+    sourceKafkaBrokers,
+    TimeSpan.FromSeconds(5),
+    provider.GetRequiredService<ILogger<KafkaSourceManager>>()));
 builder.Services.AddHostedService(provider => new SourceRegistryRefresher(
     provider.GetRequiredService<ISourceRegistry>(),
     TimeSpan.FromSeconds(5),

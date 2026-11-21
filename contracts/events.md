@@ -37,6 +37,8 @@ What the sources send (source ids, `source.*` topics and records, HTTP sender be
 
 `event_id` is a UUID string, unique per record, and the idempotency key for consumers. HTTP sources: UUID v7, new for
 every request (a sender retry gets a new id).
+Kafka sources: UUID v5 of `source_id`, topic, partition and offset (namespace `6f1c2b7e-3a45-4d8e-9b0a-5c7e2d4f8a11`, name `<source_id>/<topic>/<partition>/<offset>`), so a message read again after a crash gets the same `event_id`.
+Ingest reads a Kafka source's topic from its beginning on the first start and commits an offset only after Kafka confirmed the republished record.
 
 `payload` is the parsed JSON value when the body is valid JSON, otherwise the body as a string (bytes that are not valid UTF-8 become U+FFFD).
 The record key is `source_id`.
