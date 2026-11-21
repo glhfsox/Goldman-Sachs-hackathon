@@ -33,7 +33,7 @@ public static class RunbookEndpoints
 
         group.MapPost("{id}/accept", Accept)
             .WithName("AcceptRunbook")
-            .WithSummary("A person (X-User) accepts the current version; 403 for a service, 409 when not active.");
+            .WithSummary("A person (X-User) accepts ?version=; 403 for a service, 409 when not active or not the current version.");
 
         return app;
     }
@@ -82,10 +82,11 @@ public static class RunbookEndpoints
     private static async Task<Ok<RunbookResponse>> Accept(
         string id,
         [FromHeader(Name = "X-User")] string? user,
+        [FromQuery] int? version,
         IRunbookService service,
         CancellationToken cancellationToken)
     {
-        var runbook = await service.AcceptAsync(id, user, cancellationToken);
+        var runbook = await service.AcceptAsync(id, user, version, cancellationToken);
 
         return TypedResults.Ok(runbook);
     }

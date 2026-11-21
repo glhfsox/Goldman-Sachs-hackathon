@@ -23,11 +23,17 @@ converted once to this form in `runbooks.canonical`. Only `active` runbooks are 
 }
 ```
 
-- `text` is required and is what every channel shows. `action`, `params`, `approval`, `when`, `link` are optional.
-- `action` must be a registered action name; anything else stays a text-only step.
-- `approval`: `none` or `required`. When omitted on a step with an action, it is `required`,
-  unless the action is registered as `read_only`.
+- `text` is required and is what every channel shows. `action`, `params`, `approval`, `when`, `link` are optional,
+  and so are the graph fields `id`, `needs`, `if`, `retries`, `timeout_s`. Any other key is `422 invalid_runbook`.
+- `action` must be a registered action name (today `http_get`, `retry_workflow`, `restart_service`, `webhook`,
+  `ticket`, `escalate`), otherwise the api answers `422`; a step without `action` is text only. `params` is an object; without an `action` it is ignored.
+- `approval`: `none` or `required`. The api accepts it and ignores it: the action's risk decides how a run starts (#82).
 - `when` is shown to the person as a condition; it is not evaluated.
+- `id`: `[a-z0-9_-]{1,40}`, unique in the runbook; a step without one is `step-<index>` (from 0).
+  `needs`: ids of the steps it waits for; without `needs` a step waits for the step before it, so a list of
+  steps runs in order. The needs must not form a cycle.
+- `if: {step, status}`: run only when that step (one of `needs`) ended `succeeded` or `failed`.
+- `retries`: a whole number 0 to 3; `timeout_s`: 1 to 300.
 - `matches` uses the condition language and paths of [rules.md](rules.md). Placeholders are `{{path}}`.
   `matches` may be left out when the source does not say what the runbook applies to; such a runbook
   is shown only on alerts of a rule that names it in `runbook_id`.
@@ -56,6 +62,7 @@ a call is the title and first step as text-to-speech.
 
 1. The UI posts `POST /alerts/{id}/actions` ([api.md](api.md)).
 2. `approval: required` → the run waits in `waiting_approval` until someone approves or rejects it.
+   Being replaced (#82): the api ignores a step's `approval`; the action's risk decides, and runs replace this section.
 3. The API runs the plugin, stores the result in `action_runs`, appends to `alert_events`.
 4. On failure the run is `failed` and the alert stays open for a person. Nothing runs without a click.
 

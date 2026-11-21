@@ -13,5 +13,5 @@ public interface IRunbookService
 
     Task<RunbookResponse> UpdateAsync(string id, UpdateRunbookRequest request, CancellationToken cancellationToken = default);
 
-    Task<RunbookResponse> AcceptAsync(string id, string? userId, CancellationToken cancellationToken = default);
+    Task<RunbookResponse> AcceptAsync(string id, string? userId, int? version, CancellationToken cancellationToken = default);
 }

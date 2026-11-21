@@ -336,6 +336,66 @@ namespace AlertApi.Infrastructure.Migrations
                     b.ToTable("rules", (string)null);
                 });
 
+            modelBuilder.Entity("AlertApi.Domain.Models.Runbook", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("AcceptedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("accepted_at");
+
+                    b.Property<string>("AcceptedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("accepted_by");
+
+                    b.Property<string>("Canonical")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("canonical");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("format");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TeamId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("team_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("PK_runbooks");
+
+                    b.HasIndex("TeamId")
+                        .HasDatabaseName("IX_runbooks_team_id");
+
+                    b.ToTable("runbooks", (string)null);
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.SchemaSample", b =>
                 {
                     b.Property<string>("Fingerprint")

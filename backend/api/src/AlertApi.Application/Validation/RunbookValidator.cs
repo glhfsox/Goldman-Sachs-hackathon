@@ -18,6 +18,10 @@ public static partial class RunbookValidator
     private static readonly string[] StepFields =
         ["id", "text", "action", "params", "approval", "when", "link", "needs", "if", "retries", "timeout_s"];
 
+    // shortcut: fixed list until the action registry (issue #82 step 2) replaces it
+    private static readonly string[] Actions =
+        ["http_get", "retry_workflow", "restart_service", "webhook", "ticket", "escalate"];
+
     public static List<ProblemItem> ValidateCreate(string? teamId, string? title, string? format, string? source)
     {
         var problems = new List<ProblemItem>();
@@ -114,22 +118,19 @@ public static partial class RunbookValidator
             problems.Add(new ProblemItem(JsonChecks.Join(path, "id"), "must match [a-z0-9_-]{1,40}"));
         }
 
-        foreach (var name in new[] { "action", "when" })
+        if (step.TryGetProperty("action", out var action))
         {
-            if (step.TryGetProperty(name, out var value))
-            {
-                JsonChecks.CheckString(value, JsonChecks.Join(path, name), problems);
-            }
+            JsonChecks.CheckOneOf(action, JsonChecks.Join(path, "action"), problems, Actions);
+        }
+
+        if (step.TryGetProperty("when", out var when))
+        {
+            JsonChecks.CheckString(when, JsonChecks.Join(path, "when"), problems);
         }
 
         if (step.TryGetProperty("params", out var parameters) && parameters.ValueKind != JsonValueKind.Object)
         {
             problems.Add(new ProblemItem(JsonChecks.Join(path, "params"), "must be an object"));
-        }
-
-        if (step.TryGetProperty("params", out _) && !step.TryGetProperty("action", out _))
-        {
-            problems.Add(new ProblemItem(JsonChecks.Join(path, "params"), "needs an action"));
         }
 
         if (step.TryGetProperty("approval", out var approval))

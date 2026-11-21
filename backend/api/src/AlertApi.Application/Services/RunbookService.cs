@@ -107,8 +107,13 @@ public sealed partial class RunbookService : IRunbookService
         return await PublishAsync(runbook, cancellationToken);
     }
 
-    public async Task<RunbookResponse> AcceptAsync(string id, string? userId, CancellationToken cancellationToken = default)
+    public async Task<RunbookResponse> AcceptAsync(string id, string? userId, int? version, CancellationToken cancellationToken = default)
     {
+        if (version is null)
+        {
+            throw new InvalidRunbookException([new ProblemItem("version", "must be the version the person reviewed")]);
+        }
+
         if (string.IsNullOrWhiteSpace(userId) || !await _queries.UserExistsAsync(userId, cancellationToken))
         {
             throw new PersonRequiredException(userId, "accept a runbook");
@@ -119,6 +124,13 @@ public sealed partial class RunbookService : IRunbookService
         if (runbook.Status != Runbook.Active || runbook.Canonical is null)
         {
             throw new RunbookStateConflictException(id, "only an active runbook with a canonical form can be accepted");
+        }
+
+        // The person accepts the graph they saw, never a newer one saved meanwhile.
+        // shortcut: no concurrency token, so a PUT racing this request by milliseconds can still lose; add one before auto-start (#82 step 4).
+        if (runbook.Version != version)
+        {
+            throw new RunbookStateConflictException(id, $"version {version} is not the current version {runbook.Version}");
         }
 
         runbook.Accept(userId, _timeProvider.GetUtcNow());
