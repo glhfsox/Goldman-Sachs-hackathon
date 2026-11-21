@@ -3,6 +3,7 @@
 Base URL `http://localhost:8000/api`. JSON in and out. No auth in the PoC: every request carries
 `X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log. A service
 calling the api sends its own name there: the ai-worker sends `X-User: ai-worker`.
+`X-User` is required on `ack` and `resolve`: a missing header is `422 invalid_user`, an unknown user id is `404 not_found`.
 Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status; the api sends them as `application/problem+json`, so `title`, `status` and `detail` are there too. Codes: `not_found` (404), `conflict` (409), `invalid_<thing>` (422).
 
 ## Alert object
@@ -41,8 +42,8 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 |---|---|---|
 | `GET /alerts?team=&status=&limit=` | | `[Alert]`, newest `first_seen` first; `limit` defaults to 50, at most 200 |
 | `GET /alerts/{id}` | | `{alert, incident, timeline: [alert_events], notifications: [...], runbook}` |
-| `POST /alerts/{id}/ack` | | `Alert` |
-| `POST /alerts/{id}/resolve` | | `Alert` |
+| `POST /alerts/{id}/ack` | | `Alert` as published, with `status: acked` and `acked_by`. `409 conflict` unless the alert is `open` |
+| `POST /alerts/{id}/resolve` | | `Alert` as published, with `status: resolved` and `resolved_by`. `409 conflict` when it is already `resolved` |
 | `GET /rules?team=` | | `[Rule]` ([rules.md](rules.md)) |
 | `GET /rules/{id}` | | `Rule` |
 | `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule`. `409 conflict` for a taken id on `POST`; on `PUT` the body `id` must equal the URL id |

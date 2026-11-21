@@ -2,6 +2,7 @@ using System.Text.Json;
 
 using AlertApi.Application.Serialization;
 using AlertApi.Domain.Models;
+using AlertApi.Domain.ValueObjects;
 
 namespace AlertApi.Application.DTOs.Responses;
 
@@ -26,6 +27,13 @@ public sealed record AlertResponse(
     JsonElement SampleEvent)
 {
     public static AlertResponse From(Alert alert)
+    {
+        ArgumentNullException.ThrowIfNull(alert);
+
+        return From(alert.ToSnapshot());
+    }
+
+    public static AlertResponse From(AlertSnapshot alert)
     {
         ArgumentNullException.ThrowIfNull(alert);
 

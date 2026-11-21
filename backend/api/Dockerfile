@@ -1,4 +1,4 @@
-# Debian-based images: Confluent.Kafka ships librdkafka for glibc (Alpine needs extra care).
+    # Debian-based images: Confluent.Kafka ships librdkafka for glibc (Alpine needs extra care).
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY src/ src/
