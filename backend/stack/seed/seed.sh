@@ -13,12 +13,12 @@ until curl -fs -o /dev/null "$API/teams"; do
   sleep 2
 done
 
-# call METHOD PATH [FILE] -> prints the HTTP status, keeps the body in $OUT
+# call METHOD PATH [FILE] [USER] -> prints the HTTP status, keeps the body in $OUT; USER is sent as X-User
 call() {
   if [ -n "${3:-}" ]; then
-    curl -sS -o "$OUT" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' --data-binary "@$3" "$API$2"
+    curl -sS -o "$OUT" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' ${4:+-H "X-User: $4"} --data-binary "@$3" "$API$2"
   else
-    curl -sS -o "$OUT" -w '%{http_code}' -X "$1" "$API$2"
+    curl -sS -o "$OUT" -w '%{http_code}' -X "$1" ${4:+-H "X-User: $4"} "$API$2"
   fi
 }
 
@@ -35,7 +35,11 @@ for f in "$DIR"/runbooks/*.canonical.json; do
   fi
   printf '{"canonical":%s,"status":"active"}' "$(cat "$f")" > /tmp/runbook.json
   s=$(call PUT "/runbooks/$id" /tmp/runbook.json); [ "$s" = 200 ] || fail "runbook $id" "$s"
-  ok runbook "$id"
+  # A new canonical form clears the accept, so a person (anna) accepts the version just saved. Only an accepted
+  # version of an auto-risk runbook may start by itself.
+  version=$(sed -n 's/.*"version":\([0-9][0-9]*\).*/\1/p' "$OUT" | head -n 1)
+  s=$(call POST "/runbooks/$id/accept?version=$version" "" anna); [ "$s" = 200 ] || fail "accept runbook $id" "$s"
+  ok runbook "$id (version $version, accepted)"
 done
 
 for f in "$DIR"/mappings/*.json; do
@@ -51,5 +55,11 @@ for f in "$DIR"/rules/*.json; do
   [ "$s" = 200 ] || [ "$s" = 201 ] || fail "rule $id" "$s"
   ok rule "$id"
 done
+
+# The demo's automatic run: a failed settlement starts the safe runbook by itself (30 s to cancel, then the ai-worker's
+# risk check). The other runbook has an approval step, so a person starts that one from the alert.
+printf '{"start":"auto"}' > /tmp/start.json
+s=$(call PUT /runbook-starts/settlements-workflow-failed/settlement-retry /tmp/start.json anna); [ "$s" = 200 ] || fail "runbook start" "$s"
+ok runbook-start "settlements-workflow-failed settlement-retry auto"
 
 echo "seed: done"
