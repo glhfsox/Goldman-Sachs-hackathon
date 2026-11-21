@@ -258,7 +258,7 @@ Every service is stateless; all state sits in Kafka, Redis or the service's own 
 | Processor (`backend/processor`) | Applies the stored schema mapping, or marks the event unmapped. Evaluates rules. Deduplicates and groups per rule. Links related alerts into incidents. Owns alert state: writes it, publishes state changes to `alerts.changes`, applies acks and resolves from the API, and auto-resolves an alert when nothing recurs for the rule's window. | Alerts, incidents and an outbox, plus its copies of mappings, rules and the service map compiled into memory (`processor` database); counters (Redis) | Kafka partitions of `events.raw` |
 | Notifier (`backend/notifier`) | Policy: who is told, when, on which channel, in one message or a digest. Writes notification rows with a send time. Workers send through channel adapters with retry, backoff and a fallback channel. A scheduler loop runs escalation steps and digests. Reports every delivery on `alerts.timeline`. | Notification outbox, plus its copies of rules, teams, on-call, preferences, runbooks and alert state (`notifier` database) | Workers claiming rows with `SKIP LOCKED` |
 | API (`backend/api`) | REST and WebSocket for the UI: live feed, ack and resolve, rules, mappings, preferences, runbooks, approvals, improvement proposals. Hosts the runbook module: lookup, placeholder fill, and the action runner with its approval gate. | Owns all configuration (published on `config.changes`), runbooks, the timeline, action runs and proposals; keeps a read copy of alerts and deliveries (`api` database); pushes via Redis pub/sub | Replicas; any replica can push to any browser |
-| AI worker (`backend/ai-worker`) | Off the event path. An LLM agent with three tools, each checked by code before anything is saved: it writes the mapping for a new schema, converts an uploaded runbook to the canonical form, and proposes a runbook from the timeline of a resolved alert. A severity judge (TypeSafe Jev, one call per job) proposes the severity a rule should fix from how people reacted to its alerts. Sends its results to the API over REST. | Its job queue and alert history (`ai_worker` database) | One or two workers with a concurrency cap |
+| AI worker (`backend/ai-worker`) | Off the event path. An LLM agent with three tools, each checked by code before anything is saved: it writes the mapping for a new schema, converts an uploaded runbook to the canonical form, and proposes a runbook from the timeline of a resolved alert. Three judges on TypeSafe Jev (a decision model, one call per job, never per event): one proposes the severity a rule should fix from how people reacted to its alerts; one checks every runbook run of risk `auto` before it starts and holds it for a person when it is risky or the judge did not answer; one proposes, from the run history, whether a runbook's runs should start by themselves or wait for approval. On its own a judge can only make things more careful. Sends its results to the API over REST. | Its job queue, alert history and copy of finished runbook runs (`ai_worker` database) | One or two workers with a concurrency cap |
 
 Shared infrastructure: one internal Kafka cluster used by all backend services, with five topics
 (`events.raw` and `alerts.changes` on the event path; `config.changes`, `alerts.timeline` and `schema.samples`
@@ -274,7 +274,7 @@ runbook actions call.
 | Processor | `processor` | Alerts, incidents, its outbox, the schemas already reported, parked unmapped events | Mappings, rules, service map (`config.changes`) |
 | Notifier | `notifier` | Notifications (delivery outbox) | Alerts (`alerts.changes`); rules, teams, users, on-call, preferences, runbooks (`config.changes`) |
 | API | `api` | Sources, mappings, rules, teams, users, on-call, preferences, service map, runbooks, timeline, action runs, proposals | Alerts (`alerts.changes`), deliveries (`alerts.timeline`), schema samples (`schema.samples`) |
-| AI worker | `ai_worker` | Its job queue, its alert history | nothing |
+| AI worker | `ai_worker` | Its job queue, its alert history | Finished runbook runs (the api's `GET /runs`) |
 
 - A table has one owner, and only that service connects to the database it lives in.
 - Data crosses services only as Kafka records on the shared cluster, or through the API's REST endpoints
@@ -371,4 +371,9 @@ each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-cr
   and a user picker in the UI; the load test reports ingest → alert visible and ingest → mock channel
   separately, with the duplicate ratio stated; Claude receives one truncated sample payload per new schema,
   runbook text on upload, and the event and timeline (capped) of a resolved alert on which people ran actions.
+- Runbook runs (decided 21-11, spec in issues #73 and #75): the action registry puts every run in one of three risks.
+  `read_only` starts at once, `approval` always waits for a person, and `auto` starts only after the Jev risk
+  check clears it; a risky run, an unsure answer or no answer means it waits for a person. TypeSafe Jev receives
+  the rule, a summary of the alert, the run's actions with filled parameters and reaction statistics: no raw
+  payload, no user ids.
 - AC-5.1, AC-5.2 and AC-7.2 are still TBD: the design supports them, the thresholds are not set.

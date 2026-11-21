@@ -141,3 +141,15 @@ until code has validated it.
 - A `mapping` job that fails is not retried: the processor publishes one sample per schema, so a person writes that
   mapping.
 - The stub api stands in for the real one.
+
+## Future improvements
+
+- The risk check holds 5 of the 15 harmless runs in `evals/run_risk_golden.jsonl` (production jobs with no money
+  in them, test amounts in staging): wording or `CLEAR_MIN`, measured on the set.
+- The start-mode judge files no `auto` proposal for a routine production restart with a perfect history: Jev picks
+  `auto` with a confidence under `START_MIN`, although its probability is high.
+- Both labelled sets were written and labelled by one hand, the one that tuned the wording: have someone else
+  review the labels and add cases from real runs.
+- The judges only see runs of risk `auto`, which today means `retry_workflow` and reads; what else becomes `auto`
+  is decided in the api's action registry (issue #73, question 2).
+- A job that failed three times stays `failed`; nothing retries it later.
