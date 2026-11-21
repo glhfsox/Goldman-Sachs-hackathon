@@ -28,15 +28,16 @@ def claim(conn, kinds: list[str]) -> dict | None:
     return row
 
 
-def finish(conn, job: dict, result: dict | None = None, error: str | None = None, retry: bool = False) -> None:
+def finish(conn, job: dict, result: dict | None = None, error: str | None = None, retry: bool = False) -> str:
     """Record the outcome of a claimed job and commit: done with `result`; or failed with `error`, unless `retry`
-    and attempts are left, then back to pending."""
+    and attempts are left, then back to pending. Returns the new status."""
     attempts = job["attempts"] + 1
     status = "done" if error is None else "pending" if retry and attempts < MAX_ATTEMPTS else "failed"
     conn.execute("UPDATE jobs SET status = %s, attempts = %s, result = %s, error = %s,"
                  " finished_at = CASE WHEN %s = 'pending' THEN NULL ELSE clock_timestamp() END WHERE id = %s",
                  (status, attempts, None if result is None else Jsonb(result), error, status, job["id"]))
     conn.commit()
+    return status
 
 
 def other_samples(conn, job_id: str) -> list[dict]:

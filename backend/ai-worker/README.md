@@ -2,8 +2,16 @@
 
 An LLM agent off the event path: no event waits for it. It turns three kinds of Kafka records into jobs (table
 `jobs`, [contracts/schemas/ai-worker.md](../../contracts/schemas/ai-worker.md)) and runs one Claude tool-use loop
-per job. Each loop has exactly one tool; its handler validates what the model submits in code, returns the errors to
-the model so it can fix and resubmit, and saves the result through the api's REST endpoints once it is valid.
+per job (Claude Sonnet 5.5 by default). Each loop has exactly one tool; its handler validates what the model submits in
+code, returns the errors to the model so it can fix and resubmit, and saves the result through the api's REST
+endpoints once it is valid.
+
+The loop is a LangGraph graph (`ai_worker/agent.py`: a model node that calls the Anthropic SDK, a tool node) with a
+checkpoint in the worker's own Postgres after every node, thread id = the job id. A job retried after an error, or
+re-run after the worker was killed, resumes from its last checkpoint: replies already received are not asked for
+again. On resume the tool calls the checkpoint already answered run again (validation only, and the mapping's
+idempotent `PUT`), so the handler knows what it saved. A job's checkpoints are deleted when it ends `done` or
+`failed`.
 
 | Record | Job id | Kind | What the job does |
 |---|---|---|---|
@@ -35,7 +43,7 @@ export `KAFKA_HOST_PORT` (e.g. `29192`) for every compose command: without it Ka
 host client silently talks to the other stack's broker.
 
 Env: `KAFKA_BROKERS`, `DATABASE_URL`, `API_URL` (with `/api`), optional `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`
-(default `claude-opus-5-5`), optional `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` (default `https://api.typesafe.ai`) and
+(default `claude-sonnet-5-5`), optional `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` (default `https://api.typesafe.ai`) and
 `TYPESAFE_MODEL` (default `jev-latest`). Without a key the worker starts, keeps consuming and enqueuing, logs one
 warning per missing key and runs no job of the kinds that need it (Anthropic: mapping, runbook, proposal; TypeSafe:
 severity, run_risk, run_start; without the TypeSafe key it does not poll `GET /runs` either). The image also holds the processor's `core.py` and `models.py` (pure mapping code, imported, not copied).
@@ -125,7 +133,9 @@ were written by the same hand that tuned the wording, so expect less on new case
 ## What is sent to Claude
 
 Only the job's input, marked as untrusted data, with the job kind's system prompt. Nothing the model writes is saved
-until code has validated it.
+until code has validated it. The conversation (the same data and the model's replies) is also kept in the
+checkpoint tables of the worker's own database until the job ends; LangSmith tracing stays off (it needs
+`LANGSMITH_TRACING`, which is not set).
 
 - `mapping`: the source id, the whole sample payload as the processor published it (the processor already cuts a
   payload over 16 KB to a preview; such a sample fails the job without a model call), and the id and `match` of every
@@ -138,8 +148,11 @@ until code has validated it.
 
 ## Known limits
 
-- A worker killed mid-job re-runs that job on its next start without counting an attempt. A `proposal`,
-  `severity` or `run_start` job that died between the `POST` and the commit files a second proposal.
+- A worker killed mid-job re-runs that job on its next start without counting an attempt; a Claude job resumes
+  from its checkpoint, and only the model call that was in flight is paid again. A `proposal`, `severity` or
+  `run_start` job that died between the `POST` and the commit files a second proposal.
+- A worker killed between a job's commit and the deletion of its checkpoints leaves them behind (a few rows,
+  never read again).
 - One worker runs one job at a time: a long Claude job can delay a `run_risk` job past its run's `start_at`, and the
   run then waits for a person (safe, but less automation).
 - A `mapping` job that fails is not retried: the processor publishes one sample per schema, so a person writes that

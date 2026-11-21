@@ -5,6 +5,7 @@ One thread: the loop polls Kafka between jobs, so a long job delays consumption 
 idempotent and offsets are committed only after the job row is inserted).
 """
 
+import functools
 import json
 import logging
 import os
@@ -17,6 +18,8 @@ from types import SimpleNamespace
 
 import psycopg
 from confluent_kafka import OFFSET_BEGINNING, Consumer, KafkaException, TopicPartition
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg.rows import dict_row
 
 from . import agent, jobs, judge, mapping, runbooks, runs
 from .agent import JobFailed
@@ -178,23 +181,26 @@ class Worker:
         log.info("running %s (attempt %d)", job["id"], job["attempts"] + 1)
         ctx = SimpleNamespace(api=self.api, mappings=list(self.mappings.values()),
                               other_samples=lambda: jobs.other_samples(self.jobs_pg, job["id"]),
-                              run_agent=agent.run_agent, rules=self.rules, ask_jev=judge.ask_jev,
+                              run_agent=functools.partial(agent.run_agent, thread_id=job["id"]),
+                              rules=self.rules, ask_jev=judge.ask_jev,
                               rule_stats=lambda rid: judge.stats(self.jobs_pg, rid, datetime.now(UTC)),
                               run_stats=lambda rid, rb: runs.stats(self.jobs_pg, rid, rb, datetime.now(UTC)),
                               now=lambda: datetime.now(UTC))
+        wait = 0
         try:
             result = HANDLERS[job["kind"]](job["input"], ctx)
         except (JobFailed, ApiError) as e:
             log.warning("%s failed: %s", job["id"], e)
-            jobs.finish(self.jobs_pg, job, error=str(e))
+            status = jobs.finish(self.jobs_pg, job, error=str(e))
         except Exception as e:
             log.exception("%s failed, will retry", job["id"])
-            jobs.finish(self.jobs_pg, job, error=repr(e), retry=True)
-            return RETRY_S
+            status, wait = jobs.finish(self.jobs_pg, job, error=repr(e), retry=True), RETRY_S
         else:
             log.info("%s done", job["id"])
-            jobs.finish(self.jobs_pg, job, result=result)
-        return 0
+            status = jobs.finish(self.jobs_pg, job, result=result)
+        if status != "pending" and KEYS[job["kind"]] == "ANTHROPIC_API_KEY":
+            agent.forget(job["id"])  # a pending job keeps its checkpoints: the retry resumes from them
+        return wait
 
 
 def main() -> None:
@@ -204,10 +210,11 @@ def main() -> None:
         sys.exit(f"ai-worker: missing env var {', '.join(missing)}")
     brokers, db_url = os.environ["KAFKA_BROKERS"], os.environ["DATABASE_URL"]
 
-    with psycopg.connect(db_url, autocommit=True) as c:  # the lock is released when the connection closes
+    with psycopg.connect(db_url, autocommit=True, row_factory=dict_row) as c:  # the lock is released on close
         c.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK,))
         for f in sorted(MIGRATIONS.glob("*.sql")):
             c.execute(f.read_text())
+        PostgresSaver(c).setup()  # LangGraph's checkpoint tables and their own migrations
 
     group = {"bootstrap.servers": brokers, "group.id": "ai-worker", "enable.auto.commit": False,
              "max.poll.interval.ms": MAX_POLL_INTERVAL_MS}

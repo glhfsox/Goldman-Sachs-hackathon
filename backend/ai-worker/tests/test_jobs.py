@@ -1,7 +1,8 @@
 import psycopg
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
-from ai_worker import jobs, main
+from ai_worker import agent, jobs, main
 from ai_worker.agent import JobFailed
 from ai_worker.api import ApiError
 
@@ -78,6 +79,8 @@ def worker(conns, monkeypatch):
 
     behaviour = []
     monkeypatch.setitem(main.HANDLERS, "mapping", handler)
+    saver = InMemorySaver()
+    monkeypatch.setattr(agent, "_saver", lambda: saver)
     w = main.Worker(pg, jobs_pg, None, None, None, api="api")
     w.mappings = {"m1": {"id": "m1"}}
     return w, pg, behaviour, calls

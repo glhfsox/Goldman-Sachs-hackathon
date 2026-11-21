@@ -37,6 +37,17 @@ Example row:
  "finished_at": "2026-11-20T10:15:09.800Z"}
 ```
 
+### Checkpoint tables (LangGraph)
+
+`checkpoint_migrations`, `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`: the state of each running Claude
+job's tool-use loop (the conversation sent to Claude, the model's replies, reply and token counters), one thread per
+job, `thread_id` = `jobs.id`. Created and migrated by `langgraph-checkpoint-postgres` (`PostgresSaver.setup()`,
+its own versions in `checkpoint_migrations`), which the worker runs at start under the same advisory lock as
+`migrations/`; their columns are that library's (`langgraph-checkpoint-postgres` 3.2.1:
+thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint jsonb, metadata jsonb; blobs and writes as
+bytea). A job that resumes reads its thread; the rows of a job are deleted when the job ends `done` or `failed`, so
+only `pending` jobs have any. Nothing else reads them.
+
 ### `alert_history`
 
 One row per alert, written from every `alerts.changes` record ([../events.md](../events.md) §4) before
