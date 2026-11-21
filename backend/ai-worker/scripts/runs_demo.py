@@ -4,13 +4,14 @@
 
 Needs the ai-worker running with TYPESAFE_API_KEY. It publishes two rules on `config.changes`, schedules three `auto`
 runs in the stub (a staging retry, a large prod settlement retry, and one whose window is already over, so nobody can
-judge it), prints each verdict and status, then adds 10 finished runs that a person approved within seconds and
-prints the `runbook_start` proposal the ai-worker files for the staging rule. Each run uses new rule ids.
+judge it), prints each verdict and status, then opens 10 staging alerts on `alerts.changes`, adds a finished run
+for each that a person approved within seconds of the alert, and prints the `runbook_start` proposal the ai-worker files for the staging rule. Each run uses new rule ids.
 """
 
 import json
 import os
 import time
+import uuid
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
@@ -109,6 +110,18 @@ def main() -> None:
                          "cancelled_by": None, "risk_check": None,
                          "nodes": [{"id": "retry", "action": "retry_workflow", "risk": "auto", "status": "succeeded",
                                     "params": {"workflowId": f"WF-{i}"}}]})
+    for r in finished:  # their alerts' `opened` records (events.md §4), so the stats know when each alert opened
+        a = {"id": r["alert_id"], "rule_id": STAGING, "team_id": "settlements", "status": "open", "severity": "warning",
+             "title": "nightly-report failed in staging", "count": 1, "first_seen": r["start_at"],
+             "last_seen": r["start_at"], "first_received_at": r["start_at"],
+             "sample_event": {"type": "WORKFLOW_FAILED", "service": "reporting", "env": "staging",
+                              "severity": "warning", "mapped": True}}
+        p.produce("alerts.changes", key=a["id"], value=json.dumps(
+            {"change_id": str(uuid.uuid4()), "change": "opened", "at": r["start_at"], "actor": "processor", "alert": a}))
+    if p.flush(10):
+        raise SystemExit(f"alerts.changes records not delivered to {BROKERS}")
+    print("10 staging alerts opened")
+    time.sleep(3)  # the worker reads alerts.changes between jobs
     call("POST", "/stub/finished-runs", {"runs": finished})
     print("10 finished staging runs added, all approved by a person within seconds; waiting for a runbook_start "
           "proposal")

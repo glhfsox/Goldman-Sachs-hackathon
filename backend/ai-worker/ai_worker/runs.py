@@ -42,12 +42,18 @@ RISK_QUESTION = {
 START_QUESTION = {
     "type": "choice",
     "instructions": "How should runs of this runbook on this rule start from now on? The state holds the actions, "
-                    "the rule and how the most recent runs went.",
-    "criteria": {"auto": "Start by themselves (after the cancel window and the live risk check): people approve "
-                         "nearly every run quickly, runs rarely fail or get cancelled, and the actions are routine "
-                         "and easy to undo.",
-                 "approval": "Each run waits for a person: runs get cancelled, fail or wait long for approval, or "
-                             "the actions could do real harm."}}
+                    "the rule and how the most recent runs went. Decide in two steps. First: if a run could move "
+                    "money or touch payments, settlements, payouts or trades in production, the answer is approval, "
+                    "whatever the history says. Staging, UAT and dev are not production, and restarting a "
+                    "service, retrying a report or a log job, or opening a ticket moves no money. Otherwise "
+                    "judge by the history.",
+    "criteria": {"auto": "Start by themselves (after the cancel window and the live risk check). Only when no money, "
+                         "payment, settlement, payout or trade in production is touched, and people approved nearly "
+                         "every run quickly, nearly every alert got a run, and runs rarely failed or got cancelled.",
+                 "approval": "Each run waits for a person. Always when a run could move money or touch payments, "
+                             "settlements, payouts or trades in production, however clean the history. Also when "
+                             "runs get cancelled, fail, are held by the risk check or wait long for approval, or "
+                             "most alerts get no run."}}
 
 UPSERT = """
 INSERT INTO run_history (run_id, alert_id, rule_id, runbook_id, team_id, trigger, status, risk_check, actions,
@@ -160,7 +166,8 @@ def _stat_reasons(s: dict) -> list[str]:
     if h:
         out.append(f"{h} of {n} runs were held by the risk check")
     if s["rule_alerts"]:
-        out.append(f"{s['alerts_without_run']} of {s['rule_alerts']} alerts of this rule got no run")
+        out.append(f"{s['alerts_without_run']} of {s['rule_alerts']} alerts of this rule got no run"
+                   if s["alerts_without_run"] else f"all {s['rule_alerts']} alerts of this rule got a run")
     return out
 
 
