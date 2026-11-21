@@ -20,6 +20,7 @@ builder.Services.AddDbContext<IngestDbContext>(options =>
     options.UseNpgsql(DatabaseUrl.ToConnectionString(databaseUrl)));
 builder.Services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<IngestDbContext>());
 builder.Services.AddScoped<ISourceRepository, SourceRepository>();
+builder.Services.AddScoped<ISourceService, SourceService>();
 builder.Services.AddSingleton<ISourceRegistry, InMemorySourceRegistry>();
 
 var kafkaBrokers = builder.Configuration["KAFKA_BROKERS"]
@@ -29,6 +30,15 @@ var kafkaBrokers = builder.Configuration["KAFKA_BROKERS"]
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IRawEventPublisher>(_ => new KafkaRawEventPublisher(kafkaBrokers));
 builder.Services.AddScoped<IIngestService, IngestService>();
+
+builder.Services.AddHostedService(provider => new ConfigChangesConsumer(
+    provider.GetRequiredService<IServiceScopeFactory>(),
+    kafkaBrokers,
+    provider.GetRequiredService<ILogger<ConfigChangesConsumer>>()));
+builder.Services.AddHostedService(provider => new SourceRegistryRefresher(
+    provider.GetRequiredService<ISourceRegistry>(),
+    TimeSpan.FromSeconds(5),
+    provider.GetRequiredService<ILogger<SourceRegistryRefresher>>()));
 
 // Responses use snake_case like every record in contracts/events.md (event_id).
 builder.Services.ConfigureHttpJsonOptions(options =>
