@@ -19,7 +19,7 @@ export function SignInPage() {
       <section className="hero">
         <div className="row" style={{ gap: 10 }}>
           <Logo size={34} light={false} />
-          <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>Relay</span>
+          <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>Alpin</span>
         </div>
         <div className="stack" style={{ gap: 20, maxWidth: 560 }}>
           <h1 style={{ margin: 0, fontSize: 56, lineHeight: 1.02, fontWeight: 800, letterSpacing: '-0.035em' }}>

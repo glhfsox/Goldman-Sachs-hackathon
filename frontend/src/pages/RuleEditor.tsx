@@ -316,7 +316,7 @@ export function RuleEditorPage() {
               <div className="small" style={{ marginTop: 4 }}>{rule.severity ? cap(rule.severity) : 'Critical (from the event)'} · {fillTemplate(rule.present?.body || 'Counterparty service did not respond in 5000 ms', SAMPLE)}</div>
             </div>
           </div>
-          <div className="small">As SMS: “{(rule.severity ?? 'critical').toUpperCase()} {titlePreview} relay.example/a/…”</div>
+          <div className="small">As SMS: “{(rule.severity ?? 'critical').toUpperCase()} {titlePreview} alpin.example/a/…”</div>
         </div>
       </aside>
     </Shell>

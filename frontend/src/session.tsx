@@ -5,7 +5,7 @@ import type { Team, User } from './api/types';
 // Who the UI acts as. No login in the PoC (contracts/api.md): the person is picked on the sign-in
 // screen, kept in this browser, and sent as X-User on every request.
 
-const KEY = 'relay.user';
+const KEY = 'alpin.user';
 
 interface Session {
   user: User | null;

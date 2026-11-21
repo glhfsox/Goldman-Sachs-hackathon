@@ -32,7 +32,7 @@ export function Shell({ side, children }: { side: ReactNode; children: ReactNode
   return (
     <div className="app">
       <nav className="rail" aria-label="Main">
-        <NavLink to="/preferences" className="logo" aria-label="Relay: go to my notifications" title="My notifications"><Logo /></NavLink>
+        <NavLink to="/preferences" className="logo" aria-label="Alpin: go to my notifications" title="My notifications"><Logo /></NavLink>
         {link('/alerts', 'Alerts', <Bell />)}
         {link('/rules', 'Rules', <Sliders />)}
         {link('/runbooks', 'Runbooks', <Book />)}

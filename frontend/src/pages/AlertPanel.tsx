@@ -24,7 +24,7 @@ function pretty(kind: string): string {
 
 /** One timeline row (an alert_events row) in plain words. */
 function timelineText(e: AlertEvent, userName: (id: string) => string): string {
-  const who = e.actor === 'auto' ? 'Relay' : ['processor', 'notifier', 'api', 'ai-worker'].includes(e.actor) ? 'Relay' : userName(e.actor);
+  const who = e.actor === 'auto' ? 'Alpin' : ['processor', 'notifier', 'api', 'ai-worker'].includes(e.actor) ? 'Alpin' : userName(e.actor);
   const d = (e.data ?? {}) as Record<string, any>;
   const n = d.notification as Record<string, any> | undefined;
   switch (e.kind) {
