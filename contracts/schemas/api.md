@@ -1,6 +1,6 @@
 # Database `api` (service: api)
 
-Host `api-db`. Only the api connects. Migrations: `backend/api/migrations/`.
+Host `api-db`. Only the api connects. Migrations: `backend/api/src/AlertApi.Infrastructure/Migrations/`.
 Shared rules: [../storage.md](../storage.md). The REST shapes built from these tables: [../api.md](../api.md).
 
 ## Owned tables: configuration
@@ -21,6 +21,7 @@ Every insert, update or soft-delete below is published to Kafka `config.changes`
 | `runbooks` | `id` text primary key, `team_id` text, `title` text, `format` text, `source` text, `canonical` jsonb ([../runbooks.md](../runbooks.md)), `status` text (`draft` \| `active`), `version` int, `updated_at` timestamptz | `runbook` |
 
 `teams`, `users`, `memberships` and `service_deps` are seeded; the seed is published like any change.
+`sources` is seeded with the four sources of [../data/sources.md](../data/sources.md) §1 by the `AddSources` migration, which also queues their `config.changes` records in `outbox`.
 
 ## Owned tables: activity
 
@@ -77,10 +78,11 @@ Example row:
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | bigserial, primary key | Published in `id` order, then deleted |
+| `id` | bigint identity, primary key | Published in `id` order, then deleted |
 | `topic` | text, not null | `config.changes` or `alerts.changes` (ack, resolve) |
 | `key` | text, not null | |
 | `payload` | jsonb, not null | The record, exactly as in [../events.md](../events.md) |
+| `created_at` | timestamptz, not null | When the row was written |
 
 ## Copies (read models)
 

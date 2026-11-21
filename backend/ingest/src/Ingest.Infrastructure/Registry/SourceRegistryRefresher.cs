@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using Ingest.Application.Interfaces;
+using Ingest.Infrastructure.Logging;
 
 namespace Ingest.Infrastructure.Registry;
 
@@ -12,15 +13,18 @@ public sealed class SourceRegistryRefresher : BackgroundService
     private readonly ISourceRegistry _registry;
     private readonly TimeSpan _interval;
     private readonly ILogger<SourceRegistryRefresher> _logger;
+    private readonly LogThrottle _logThrottle;
 
     public SourceRegistryRefresher(
         ISourceRegistry registry,
         TimeSpan interval,
-        ILogger<SourceRegistryRefresher> logger)
+        ILogger<SourceRegistryRefresher> logger,
+        LogThrottle logThrottle)
     {
         _registry = registry;
         _interval = interval;
         _logger = logger;
+        _logThrottle = logThrottle;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -49,7 +53,10 @@ public sealed class SourceRegistryRefresher : BackgroundService
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // Keep the last good copy; the next tick tries again.
-            _logger.LogWarning(exception, "Cannot refresh the source registry");
+            if (_logThrottle.TryAcquire("registry-refresh", out var suppressed))
+            {
+                _logger.LogWarning(exception, "Cannot refresh the source registry ({Suppressed} similar lines hidden)", suppressed);
+            }
         }
     }
 }

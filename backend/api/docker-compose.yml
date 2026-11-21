@@ -1,0 +1,35 @@
+# One command starts the API with its database and the shared Kafka:  docker compose up --build
+# Ports, env vars and hosts: contracts/services.md and contracts/storage.md.
+name: api
+
+include:
+  - path: ../kafka/docker-compose.yml
+
+services:
+  api-db:
+    image: postgres:17
+    ports:
+      - "5436:5432"
+    environment:
+      POSTGRES_USER: alerts
+      POSTGRES_PASSWORD: alerts
+      POSTGRES_DB: api
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alerts -d api"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://alerts:alerts@api-db:5432/api
+      ENABLE_SWAGGER: "true"
+    depends_on:
+      api-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully

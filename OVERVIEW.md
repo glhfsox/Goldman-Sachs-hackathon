@@ -267,7 +267,7 @@ runbook actions call.
 | Service | Database | Owns | Keeps a copy of (fed by) |
 |---|---|---|---|
 | Ingest | `ingest` | nothing | Sources (`config.changes`) |
-| Processor | `processor` | Alerts, incidents, its outbox, the schemas already reported | Mappings, rules, service map (`config.changes`) |
+| Processor | `processor` | Alerts, incidents, its outbox, the schemas already reported, parked unmapped events | Mappings, rules, service map (`config.changes`) |
 | Notifier | `notifier` | Notifications (delivery outbox) | Alerts (`alerts.changes`); rules, teams, users, on-call, preferences, runbooks (`config.changes`) |
 | API | `api` | Sources, mappings, rules, teams, users, on-call, preferences, service map, runbooks, timeline, action runs, proposals | Alerts (`alerts.changes`), deliveries (`alerts.timeline`), schema samples (`schema.samples`) |
 | AI worker | `ai_worker` | Its job queue | nothing |
@@ -285,7 +285,8 @@ runbook actions call.
    to `events.raw`, and acknowledges the source only after Kafka confirms.
 2. A Processor replica reads it and finds the mapping whose `match` condition fits. It builds the envelope
    `{source, type, severity, env, service, ts, dedup_hints, raw}`. With no mapping it builds an unmapped
-   envelope with defaults and publishes one sample of that schema to `schema.samples` for the AI worker.
+   envelope with defaults, publishes one sample of that schema to `schema.samples` for the AI worker, and
+   parks the event; when the mapping arrives, parked events run again as mapped ones.
 3. It evaluates every team's rules against the envelope and `raw`. Each matching rule yields an alert key
    from that rule's `alert_key` and window settings.
 4. For each key, one atomic Redis operation bumps the alert's counter and `last_seen`, skipping an event
@@ -317,7 +318,7 @@ each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-cr
 | Area | Proposed | Final | Needed for |
 |---|---|---|---|
 | Normalization | Claude maps every payload | Claude writes a mapping once per schema; Processor applies it | AC-2.2, AC-9.2 |
-| Unknown schema | No path when the LLM fails or is slow | Event shown as unmapped at once; mapping proposed in the background | AC-2.1 |
+| Unknown schema | No path when the LLM fails or is slow | Event shown as unmapped at once; mapping written in the background, then the waiting events are processed with it | AC-2.1 |
 | Ingest | Preprocesses payloads; hand-off undecided | Receives, stamps, enqueues; acknowledges after Kafka confirms | AC-1.2, AC-9.2 |
 | Dedup | Separate job before the Rule Engine | Step in Processor after rule match, keyed by the rule's settings | AC-4.1, AC-4.4 |
 | Aggregation | Per routed bucket | Incidents correlated across teams with a `depends_on` service map | AC-4.2 |
@@ -357,7 +358,8 @@ each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-cr
   `alerts.timeline`, schema samples on `schema.samples`; the Processor, which owns alert state, auto-resolves
   alerts (was: Notifier); the AI worker saves its results through the API.
 - New schema: a Claude-proposed mapping is applied automatically once it validates on the stored sample.
-- Unmapped events: only events arriving after the mapping is active use it; no replay.
+- Unmapped events: the processor parks them (up to 1,000 per schema, for 1 hour) and processes them as
+  soon as a mapping for them is active (changed on 21-11, was: no replay).
 - Rule language: a JSON tree of `{all / any: [{field, op, value}]}`, shared by rules, mapping `match` and
   runbook `matches` ([contracts/rules.md](contracts/rules.md)).
 - Dedup and correlation windows: 5 minutes by default, per rule; an estimate, not measured.

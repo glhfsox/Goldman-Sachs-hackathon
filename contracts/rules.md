@@ -67,8 +67,9 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
 - Onboarding a new schema: the processor publishes one sample per unknown shape to Kafka `schema.samples`
   ([events.md](events.md) §8); the AI worker asks Claude for a mapping object and saves it through the API as `active` if every `path` resolves on
   the sample, the severity is on the scale and `ts` parses. Otherwise the sample is marked `failed` and
-  a person writes the mapping in the UI. Only events that arrive after the mapping is active use it;
-  earlier ones stay unmapped.
+  a person writes the mapping in the UI. Events of that schema that arrived earlier are not lost: the
+  processor parks them (up to 1,000 per schema, for 1 hour) and runs them through the mapping and the
+  rules as soon as a mapping for them becomes active.
 
 ## 4. Rule (table `rules`)
 
@@ -105,6 +106,8 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
 - `route.channels`: any of `ui`, `email`, `sms`, `call`. When omitted, each recipient's own preferences
   decide. Quiet hours and the per-hour limit from preferences always apply.
 - `present.color`: `red`, `orange`, `yellow`, `blue` or `grey`. Templates use `{{path}}`.
+- `present` is optional. A rule without `present.title` gets its `name` as the alert title, or
+  `{{type}} · {{service}}` when it has no name, so no channel ever shows a blank title.
 - A person matched by several rules for one incident gets one message.
 - An invalid rule is rejected by the API with `422` and never reaches the processor (see [api.md](api.md)).
 - The processor reloads rules and mappings within 5 s of a change (they arrive on Kafka `config.changes`,

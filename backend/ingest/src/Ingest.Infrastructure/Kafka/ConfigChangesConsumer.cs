@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using Ingest.Application.Interfaces;
+using Ingest.Infrastructure.Logging;
 
 namespace Ingest.Infrastructure.Kafka;
 
@@ -19,17 +20,20 @@ public sealed class ConfigChangesConsumer : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _brokers;
     private readonly ILogger<ConfigChangesConsumer> _logger;
+    private readonly LogThrottle _logThrottle;
 
     public ConfigChangesConsumer(
         IServiceScopeFactory scopeFactory,
         string brokers,
-        ILogger<ConfigChangesConsumer> logger)
+        ILogger<ConfigChangesConsumer> logger,
+        LogThrottle logThrottle)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(brokers);
 
         _scopeFactory = scopeFactory;
         _brokers = brokers;
         _logger = logger;
+        _logThrottle = logThrottle;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -78,7 +82,11 @@ public sealed class ConfigChangesConsumer : BackgroundService
         catch (ConsumeException exception)
         {
             // The topic may not exist yet while Kafka starts; keep trying.
-            _logger.LogWarning("Cannot read {Topic}: {Reason}", Topic, exception.Error.Reason);
+            if (_logThrottle.TryAcquire("config-changes-read", out var suppressed))
+            {
+                _logger.LogWarning("Cannot read {Topic}: {Reason} ({Suppressed} similar lines hidden)", Topic, exception.Error.Reason, suppressed);
+            }
+
             await Task.Delay(RetryDelay, stoppingToken);
 
             return;
@@ -140,7 +148,11 @@ public sealed class ConfigChangesConsumer : BackgroundService
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                _logger.LogError(exception, "Cannot save {Topic} record at {Offset}; retrying", Topic, result.TopicPartitionOffset);
+                if (_logThrottle.TryAcquire("config-changes-save", out var suppressed))
+                {
+                    _logger.LogError(exception, "Cannot save {Topic} record at {Offset}; retrying ({Suppressed} similar lines hidden)", Topic, result.TopicPartitionOffset, suppressed);
+                }
+
                 await Task.Delay(RetryDelay, stoppingToken);
             }
         }
