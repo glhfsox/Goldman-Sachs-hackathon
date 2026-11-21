@@ -2,8 +2,19 @@
 
 An LLM agent off the event path: no event waits for it. It turns three kinds of Kafka records into jobs (table
 `jobs`, [contracts/schemas/ai-worker.md](../../contracts/schemas/ai-worker.md)) and runs one Claude tool-use loop
-per job. Each loop has exactly one tool; its handler validates what the model submits in code, returns the errors to
-the model so it can fix and resubmit, and saves the result through the api's REST endpoints once it is valid.
+per job (Claude Sonnet 5.5 by default). Each loop has exactly one tool; its handler validates what the model submits in
+code, returns the errors to the model so it can fix and resubmit, and saves the result through the api's REST
+endpoints once it is valid.
+
+The loop is a LangGraph graph (`ai_worker/agent.py`: a model node that calls the Anthropic SDK, a tool node) with a
+checkpoint in the worker's own Postgres after every node (written before the next node starts), thread id = the job
+id. A job retried after an error, or re-run after the worker was killed, resumes from its last checkpoint: replies
+already received are not asked for again. On resume the tool calls the checkpoint already answered run again
+(validation only, and the mapping's idempotent `PUT`), so the handler knows what it saved. A job's checkpoints are
+deleted in the same transaction that marks it `done` or `failed`. Every model call uses prompt caching (a breakpoint
+on the tools and system prompt, and an automatic one on the end of the conversation, 5 minutes): the second and
+later calls of a job, and a resumed job, read the prefix from the cache (measured: about 2,450 cached tokens on the
+first call already, the minimum for Sonnet 5.5 is 512).
 
 | Record | Job id | Kind | What the job does |
 |---|---|---|---|
@@ -13,8 +24,49 @@ the model so it can fix and resubmit, and saves the result through the api's RES
 | `alerts.changes`: a rule's first `opened`, and a `resolved` once per 20 resolved alerts of the rule | `severity:<rule id>:first`, `severity:<rule id>:<n>` | `severity` | Proposes the rule's severity (TypeSafe Jev, not Claude): `POST /alerts/{id}/proposals`, kind `rule_severity` |
 
 `config.changes` also feeds in-memory copies of the current mappings, which the mapping tool checks a new mapping
-against, and of the rules, which the severity judge reads. A job is retried up to 3 times on unexpected errors (api down, model API errors); a refusal, a rejected
-submission or a 4xx from the api fails it at once.
+against, and of the rules, which the severity judge reads.
+
+## Retries
+
+| What went wrong | What happens |
+|---|---|
+| Anthropic 429, 529 (overloaded), 5xx, 408, 409, timeout, connection error | The SDK retries twice (0.5 to 8 s), then the job retries |
+| TypeSafe Jev 429, 5xx, timeout, connection error, a malformed answer | The job retries |
+| api 5xx, timeout, connection error; a `404` on filing a proposal (the api has not read the alert yet) | The job retries |
+| A refusal, a rejected submission, an Anthropic or Jev 4xx (other than 408, 409, 429), any other api 4xx | The job fails at once (`failed`) |
+| The worker's own Postgres goes away (restart, dropped connection) | No attempt is counted: the claimed row's lock goes with the connection, the loop reconnects every 5 s, and the job runs again (a Claude job from its checkpoint) |
+| Kafka errors | A failed commit means redelivery (enqueue is idempotent); a batch whose enqueue failed is re-read, not skipped; a consume error waits 5 s |
+
+A job retries up to 6 attempts in all, then it is `failed`. Each retry waits until its own `run_after`: 10, 20, 40, 80
+and 160 s (each times 0.5 to 1.5, at most 300 s), about 5 minutes in all; the other jobs run meanwhile. A `run_risk`
+job waits only 2 s each time: it is useless after its run's `start_at`, and from then on it ends `done` without asking
+Jev. `run_risk` jobs are still claimed first.
+
+## Agent metrics
+
+One JSON line per finished job attempt (`done`, `failed` or `retry`), appended to `AGENT_METRICS_FILE` (default
+`logs/agent-metrics.jsonl` under the working dir; docker compose mounts `./logs`, so it is readable on the host). A
+write that fails is logged and never breaks a job. No payloads, prompts, keys or user ids: only these fields.
+
+- Every job: `ts`, `job_id`, `kind`, `attempt`, `outcome`, `error_class` (the exception's class name),
+  `retry_in_s`, `duration_ms`.
+- Claude jobs (this attempt only, so lines add up): `model` (the reply's), `model_calls`, `model_calls_total`
+  (including the calls of earlier attempts it resumed from), `prior_model_calls`, `resumed_from_checkpoint`,
+  `tool_calls` (per tool name), `tool_errors` (tool results that were errors, such as a rejected submission),
+  `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `cost_usd` (from
+  `PRICES` in `ai_worker/agent.py`: Sonnet 5.5 and Opus 5.5 input, output, cache read and 5-minute cache write; another
+  model gives `null`), `sdk_retries` (the SDK's retries of the calls that succeeded), `stop_reason`.
+- Jev jobs: `jev_calls`, `jev_latency_ms`, `choice` and `confidence` (Jev's answer), `verdict` (`run_risk`),
+  `posted` (a proposal or verdict reached the api).
+
+```bash
+f=logs/agent-metrics.jsonl
+jq -s 'group_by(.kind) | map({kind: .[0].kind, attempts: length, done: map(select(.outcome=="done")) | length,
+  model_calls: (map(.model_calls // 0) | add), output_tokens: (map(.output_tokens // 0) | add),
+  cost_usd: (map(.cost_usd // 0) | add)})' $f                                    # totals per kind
+jq -s 'group_by(.ts[:10]) | map({day: .[0].ts[:10], cost_usd: (map(.cost_usd // 0) | add)})' $f   # cost per day
+jq -s 'length as $n | {attempts: $n, retry_rate: ((map(select(.outcome=="retry")) | length) / $n)}' $f  # retry rate
+```
 
 Status: all three tools are built (`ai_worker/mapping.py`, `ai_worker/runbooks.py`) and were run end to end
 against the real Claude API; the api they save to is still the stub.
@@ -35,8 +87,8 @@ export `KAFKA_HOST_PORT` (e.g. `29192`) for every compose command: without it Ka
 host client silently talks to the other stack's broker.
 
 Env: `KAFKA_BROKERS`, `DATABASE_URL`, `API_URL` (with `/api`), optional `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`
-(default `claude-opus-5-5`), optional `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` (default `https://api.typesafe.ai`) and
-`TYPESAFE_MODEL` (default `jev-latest`). Without a key the worker starts, keeps consuming and enqueuing, logs one
+(default `claude-sonnet-5-5`), optional `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` (default `https://api.typesafe.ai`) and
+`TYPESAFE_MODEL` (default `jev-latest`), optional `AGENT_METRICS_FILE` (default `logs/agent-metrics.jsonl`). Without a key the worker starts, keeps consuming and enqueuing, logs one
 warning per missing key and runs no job of the kinds that need it (Anthropic: mapping, runbook, proposal; TypeSafe:
 severity, run_risk, run_start; without the TypeSafe key it does not poll `GET /runs` either). The image also holds the processor's `core.py` and `models.py` (pure mapping code, imported, not copied).
 
@@ -125,7 +177,9 @@ were written by the same hand that tuned the wording, so expect less on new case
 ## What is sent to Claude
 
 Only the job's input, marked as untrusted data, with the job kind's system prompt. Nothing the model writes is saved
-until code has validated it.
+until code has validated it. The conversation (the same data and the model's replies) is also kept in the
+checkpoint tables of the worker's own database until the job ends; LangSmith tracing stays off (it needs
+`LANGSMITH_TRACING`, which is not set).
 
 - `mapping`: the source id, the whole sample payload as the processor published it (the processor already cuts a
   payload over 16 KB to a preview; such a sample fails the job without a model call), and the id and `match` of every
@@ -138,8 +192,10 @@ until code has validated it.
 
 ## Known limits
 
-- A worker killed mid-job re-runs that job on its next start without counting an attempt. A `proposal`,
-  `severity` or `run_start` job that died between the `POST` and the commit files a second proposal.
+- A worker killed mid-job re-runs that job on its next start without counting an attempt and writes no metrics
+  line for the killed attempt; a Claude job resumes from its checkpoint, and only the model call that was in flight
+  is paid again (mostly at the cache-read price). A `proposal`, `severity` or
+  `run_start` job that died between the `POST` and the commit files a second proposal.
 - One worker runs one job at a time: a long Claude job can delay a `run_risk` job past its run's `start_at`, and the
   run then waits for a person (safe, but less automation).
 - A `mapping` job that fails is not retried: the processor publishes one sample per schema, so a person writes that
@@ -156,4 +212,4 @@ until code has validated it.
   review the labels and add cases from real runs.
 - The judges only see runs of risk `auto`, which today means `retry_workflow` and reads; what else becomes `auto`
   is decided in the api's action registry (issue #73, question 2).
-- A job that failed three times stays `failed`; nothing retries it later.
+- A job that failed 6 times stays `failed`; nothing retries it later.

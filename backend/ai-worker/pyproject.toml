@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic>=1.7",
     "confluent-kafka>=2.16.2",
+    "langgraph>=1.2.24",
+    "langgraph-checkpoint-postgres>=3.2.1",
     "psycopg[binary]>=3.3",
     "pydantic>=2.11",
 ]

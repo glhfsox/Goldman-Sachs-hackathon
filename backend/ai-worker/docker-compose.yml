@@ -44,11 +44,14 @@ services:
       DATABASE_URL: postgres://alerts:alerts@ai-worker-db:5432/ai_worker
       API_URL: http://stub-api:8000/api
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       TYPESAFE_BASE_URL: ${TYPESAFE_BASE_URL:-https://api.typesafe.ai}
       TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      AGENT_METRICS_FILE: ${AGENT_METRICS_FILE:-logs/agent-metrics.jsonl}
+    volumes:
+      - ./logs:/app/logs  # the agent metrics file, readable on the host
     depends_on:
       kafka-init:
         condition: service_completed_successfully

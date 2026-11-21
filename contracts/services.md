@@ -66,9 +66,10 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 | `PUBLIC_BASE_URL` | notifier, api | `http://localhost:3000` (short alert link: `{PUBLIC_BASE_URL}/a/{alert_id}`) |
 | `VITE_API_URL` (or the frontend stack's equivalent) | frontend | `http://localhost:8000` |
 | `ANTHROPIC_API_KEY` | ai-worker only | optional: without it the system runs on seeded mappings and new schemas stay unmapped |
-| `ANTHROPIC_MODEL` | ai-worker only | optional, default `claude-opus-5-5` |
+| `ANTHROPIC_MODEL` | ai-worker only | optional, default `claude-sonnet-5-5` |
 | `TYPESAFE_API_KEY` | ai-worker only | optional: without it the ai-worker makes no `rule_severity` or `runbook_start` proposal and posts no run risk check (it does not poll `GET /runs`; those jobs stay pending) |
 | `TYPESAFE_BASE_URL` | ai-worker only | optional, default `https://api.typesafe.ai` (a local stand-in for tests) |
 | `TYPESAFE_MODEL` | ai-worker only | optional, default `jev-latest` |
+| `AGENT_METRICS_FILE` | ai-worker only | optional, default `logs/agent-metrics.jsonl` (one JSON line per job attempt: tokens, cost, tool calls, retries; docker compose mounts `backend/ai-worker/logs`) |
 
 No auth in the PoC. The UI has a user picker and sends the chosen user as the `X-User` header.

@@ -52,7 +52,7 @@
 {"from":"api","to":"api_db","data":"config, timeline, action runs, alert copy"}
 {"from":"api","to":"web_ui","data":"REST, WebSocket"}
 {"from":"web_ui","to":"api","data":"user actions"}
-{"from":"ai_worker","to":"ai_worker_db","data":"jobs, alert history, run history"}
+{"from":"ai_worker","to":"ai_worker_db","data":"jobs, alert history, run history, Claude job checkpoints"}
 {"from":"ai_worker","to":"api","data":"mappings, canonical runbooks, proposals, run risk checks (REST)"}
 {"from":"ai_worker","to":"claude_api","data":"sample payload, runbook text, alert timeline"}
 {"from":"ai_worker","to":"typesafe_api","data":"rule, alert summary, reaction and run stats, run actions with filled params"}
