@@ -6,6 +6,7 @@ import type { Alert, LiveMessage, Runbook, RunProgress, Severity } from '../api/
 import { Search } from '../components/Icons';
 import { Shell } from '../components/Shell';
 import { Pill } from '../components/Switch';
+import { proposalsChanged } from '../lib/proposalsSignal';
 import { useLoad } from '../lib/useLoad';
 import { ago, SEVERITY, STATUS } from '../lib/ui';
 import { progressChip, waitsForPerson } from '../runs/runs';
@@ -61,6 +62,8 @@ export function AlertsPage() {
     } else if (m.type === 'count') {
       alerts.setData((prev) => (prev ?? []).map((a) => (a.id === m.alert_id ? { ...a, count: m.count, last_seen: m.last_seen } : a)));
     } else if (m.type === 'timeline') {
+      // A proposal filed by the ai-worker is a timeline row too; the badge coalesces these into one fetch per 2 s.
+      proposalsChanged();
       // Run and step changes arrive as timeline messages: refresh that alert's progress.
       if (m.alert_id in progress) loadProgress([m.alert_id]);
       if (m.alert_id === selected) setTimelineTick((t) => t + 1);

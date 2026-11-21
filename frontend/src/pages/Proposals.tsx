@@ -5,6 +5,7 @@ import type { Proposal, Rule } from '../api/types';
 import { Shell } from '../components/Shell';
 import { Pill } from '../components/Switch';
 import { useToast } from '../components/Toast';
+import { proposalsChanged } from '../lib/proposalsSignal';
 import { useLoad } from '../lib/useLoad';
 import { ago, cap, RISK } from '../lib/ui';
 import { useSession } from '../session';
@@ -75,6 +76,7 @@ export function ProposalsPage() {
     try {
       const updated = how === 'accept' ? await api.acceptProposal(p.id) : await api.rejectProposal(p.id);
       proposals.setData((prev) => (prev ?? []).map((x) => (x.id === p.id ? updated : x)));
+      proposalsChanged();
       say(how === 'accept' ? 'Accepted.' : 'Rejected.');
     } catch (e) {
       say(errorText(e));

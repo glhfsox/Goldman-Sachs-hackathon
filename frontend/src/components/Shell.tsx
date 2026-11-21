@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api } from '../api/client';
+import { onProposalsChanged } from '../lib/proposalsSignal';
 import { initials } from '../lib/ui';
 import { useSession } from '../session';
 import { Bell, Book, Bulb, Logo, Plug, Sliders } from './Icons';
@@ -12,12 +13,28 @@ export function Shell({ side, children }: { side: ReactNode; children: ReactNode
 
   useEffect(() => {
     let alive = true;
-    const load = () => api.proposals('open').then((p) => alive && setOpenProposals(p.length)).catch(() => {});
+    let last = 0;
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
+      last = Date.now();
+      api.proposals('open').then((p) => alive && setOpenProposals(p.length)).catch(() => {});
+    };
+    // At most one fetch every 2 s, however many changes arrive; the last change is always fetched.
+    const soon = () => {
+      if (pending) return;
+      pending = setTimeout(() => { pending = undefined; load(); }, Math.max(0, 2_000 - (Date.now() - last)));
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') soon(); };
     load();
     const t = setInterval(load, 30_000);
+    const off = onProposalsChanged(soon);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       alive = false;
       clearInterval(t);
+      clearTimeout(pending);
+      off();
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 

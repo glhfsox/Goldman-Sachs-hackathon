@@ -4,6 +4,7 @@ import { api, errorText } from '../api/client';
 import type { Alert, AlertEvent, Runbook, RunNode, RunProgress } from '../api/types';
 import { Pill } from '../components/Switch';
 import { useToast } from '../components/Toast';
+import { proposalsChanged } from '../lib/proposalsSignal';
 import { useLoad } from '../lib/useLoad';
 import { ago, CHANNEL_LABEL, clock, listText, RISK, SEVERITY, STATUS } from '../lib/ui';
 import { AUTO_START_AVAILABLE, LIVE, nodeView, paramsLine } from '../runs/runs';
@@ -77,6 +78,7 @@ export function AlertPanel({ alert, runbook, timelineTick, onClose, onChanged, o
     if (!fixText.trim()) return say('Write what should change first.');
     try {
       await api.propose(alert.id, fixKind, { team_id: alert.team_id, rule_id: alert.rule_id, text: fixText.trim() });
+      proposalsChanged();
       setFixOpen(false);
       setFixText('');
       say(`Proposal sent. ${session.teamName(alert.team_id)} decides in Proposals.`);
