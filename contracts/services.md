@@ -31,7 +31,7 @@ Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](st
 | `ingest-db`, `processor-db`, `notifier-db`, `api-db`, `ai-worker-db` | 5432 inside compose; 5433 to 5437 on the host, in that order | One Postgres per service, see [storage.md](storage.md) |
 | `mailhog` | 1025 SMTP, 8025 web | Mock email |
 | `mock-gateway` | 8002 | Mock SMS and phone call provider: logs each delivery with a timestamp |
-| `mock-target` | 8003 | Target of runbook actions (health check, retry workflow, restart service) |
+| `mock-target` | 8003 | Target of runbook actions (`backend/mock-target/`): answers any path, logs each call with its `Idempotency-Key` (`GET /_calls`), replays the first answer for a repeated key, `POST /_fail` makes calls fail. Every seeded action target points here |
 
 ## Kafka topics
 

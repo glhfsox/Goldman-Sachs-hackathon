@@ -68,6 +68,13 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 
 A `Proposal` is `{id, alert_id, kind, body, author, status, decided_by, created_at, decided_at}`; `kind` is `threshold`, `template`, `runbook`, `rule_severity` or `runbook_start`. Accepting applies the proposal: `rule_severity` sets the rule's `severity` (published on `config.changes`; `409` when the rule no longer exists); `runbook` saves `body.canonical` as a new runbook that is `active` and accepted by that person, with an id made from `body.title` (the id inside `canonical` is replaced); `threshold` and `template` only change the status, a person applies them; `runbook_start` answers `409` until the run model exists and a rule can store the start mode. Creating and deciding add the timeline rows `proposal_created` and `proposal_decided`.
 
+| `GET /actions` | | `[{name, risk, default_target, url_method, timeout_s}]`: the registered runbook actions ([runbooks.md](runbooks.md) §3) |
+| `GET /action-targets`, `GET /action-targets/{id}` | | `[ActionTarget]`, `ActionTarget` |
+| `PUT /action-targets/{id}` | `{base_url, origins?, operations, secret_ref?}` | `ActionTarget` (create or replace, `version` + 1). `422 invalid_action_target` with one `details` entry per wrong path; `409` when the change would make an active runbook invalid (the message names them) |
+
+An `ActionTarget` is `{id, base_url, origins, operations, secret_ref, version, updated_at}` ([runbooks.md](runbooks.md) §3).
+Saving a runbook or accepting it while another request changed the same runbook is `409 conflict`.
+
 A `Runbook` is `{id, team_id, title, format, source, canonical, status, version, accepted_by, accepted_at, updated_at}`;
 `canonical` is `null` on a draft.
 

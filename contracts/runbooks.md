@@ -25,8 +25,16 @@ converted once to this form in `runbooks.canonical`. Only `active` runbooks are 
 
 - `text` is required and is what every channel shows. `action`, `params`, `approval`, `when`, `link` are optional,
   and so are the graph fields `id`, `needs`, `if`, `retries`, `timeout_s`. Any other key is `422 invalid_runbook`.
-- `action` must be a registered action name (today `http_get`, `retry_workflow`, `restart_service`, `webhook`,
-  `ticket`, `escalate`), otherwise the api answers `422`; a step without `action` is text only. `params` is an object; without an `action` it is ignored.
+- `action` must be a registered action name (`GET /api/actions`: `http_get`, `retry_workflow`, `reload_db`,
+  `restart_service`, `webhook`, `ticket`, `escalate`), otherwise the api answers `422`; a step without `action` is text
+  only. `params` is an object; without an `action` it is ignored.
+- Where an action goes is a registered **action target** (§3), never a host the runbook makes up. A step's `params`
+  either name one, `{"target": "orders-db", "operation": "reload_db", "instance": "{{instance}}"}` (`operation`
+  defaults to the action name), or leave it out and get the action's default target (`retry_workflow` →
+  `workflow-engine`, `restart_service` → `services`, `reload_db` → `orders-db`, `ticket` → `ticketing`, `escalate` →
+  `escalation`), or give a `url` whose origin a target lists: `{"url": "http://counterparty-service/health"}`. Each
+  `{name}` in the operation's path needs a `params` value (a `{{placeholder}}` is fine); other params go in the JSON
+  body of a non-GET call. A step that does not resolve to a target is `422` at its `params` path.
 - `approval`: `none` or `required`. The api accepts it and ignores it: the action's risk decides how a run starts (#82).
 - `when` is shown to the person as a condition; it is not evaluated.
 - `id`: `[a-z0-9_-]{1,40}`, unique in the runbook; a step without one is `step-<index>` (from 0).
@@ -74,7 +82,8 @@ Signatures are language-neutral; arguments and results are JSON-shaped.
 |---|---|---|---|
 | Source adapter | `backend/ingest/adapters/` | `start(config, emit)`; calls `emit(payload_bytes)` per message | a `sources` row with that `kind` |
 | Channel adapter | `backend/notifier/channels/` | `send(recipient, message) → {status, provider_id?, error?}` | notifier channel config |
-| Action plugin | `backend/api/actions/` | `run(params, context) → {ok, output?, error?}` plus `{name, read_only}` | api action registry |
+| Action plugin | `backend/api/src/AlertApi.Infrastructure/Actions/` | `run(request, context) → {ok, output?, error?}` plus `{name, risk, default_target, url_method, timeout}` | one DI line in the api's `Program.cs` |
+| Action target | `action_targets` table of the api, `PUT /api/action-targets/{id}` | `{base_url, origins, operations: {name: {method, path, risk?}}}` | a row; no code, no restart |
 
 Channel adapter arguments:
 
@@ -88,5 +97,26 @@ Channel adapter arguments:
 `send` must be idempotent on `notification_id`. Initial channels: `ui`, `email` (MailHog), `sms` and
 `call` (mock gateway).
 
-Action plugin `context`: `{alert, actor, run_id}`. Initial actions: `http_get` (`read_only`),
-`retry_workflow`, `restart_service`, `webhook`, `ticket`, `escalate`; they call `mock-target`.
+Action plugin: `request` is `{method, url, body}`, built from the step and its target when a run starts (the person
+approves exactly these requests; a target edited later changes only later runs). `context` is
+`{alert_id, run_id, node_id, idempotency_key, actor, timeout}`; the plugin sends `Idempotency-Key` with every call and
+never retries (retries are steps of the run, so every attempt is on the timeline). Output is cut to 4 KB.
+
+Risk: `read_only` (reads only), `auto` (changes something, safe to repeat), `approval` (anything else). Initial actions:
+`http_get` (`read_only`), `retry_workflow` and `reload_db` (`auto`), `restart_service`, `webhook`, `ticket`,
+`escalate` (`approval`). An operation's `risk` can raise the action's risk for that target, never lower it.
+
+Action target example (seeded by migration `AddActionTargets`, all pointing at `mock-target` in the demo):
+
+```json
+{"id": "orders-db", "base_url": "http://mock-target:8003/orders-db", "origins": [],
+ "operations": {"health": {"method": "GET", "path": "/instances/{instance}/health", "risk": "read_only"},
+                "reload_db": {"method": "POST", "path": "/instances/{instance}/reload"},
+                "restart_service": {"method": "POST", "path": "/instances/{instance}/restart"}},
+ "secret_ref": null, "version": 1}
+```
+
+The host of a call always comes from `base_url`: an alert's values only fill path segments (escaped) and the body,
+and a `url` is accepted only when its origin is listed in a target's `origins` (`http://counterparty-service` →
+`http://mock-target:8003/counterparty-service`). Seeded targets: `workflow-engine`, `services`, `orders-db`,
+`webhooks`, `ticketing`, `escalation`, `counterparty-service`, `payments-api`, `pricing-engine`.

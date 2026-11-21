@@ -19,8 +19,8 @@ public sealed class RunbookValidatorTests
 
     private const string Graph = """
         {"id": "rb", "title": "Graph",
-         "steps": [{"id": "health", "text": "Check health", "action": "http_get", "params": {"url": "http://x/health"}},
-                   {"id": "retry", "text": "Retry", "action": "retry_workflow", "needs": ["health"], "retries": 2, "timeout_s": 30},
+         "steps": [{"id": "health", "text": "Check health", "action": "http_get", "params": {"url": "http://counterparty-service/health"}},
+                   {"id": "retry", "text": "Retry", "action": "retry_workflow", "params": {"workflowId": "{{workflowId}}"}, "needs": ["health"], "retries": 2, "timeout_s": 30},
                    {"id": "escalate", "text": "Escalate", "action": "escalate", "needs": ["retry"],
                     "if": {"step": "retry", "status": "failed"}}]}
         """;
@@ -30,7 +30,7 @@ public sealed class RunbookValidatorTests
     [InlineData(Graph, "rb")]
     public void Canonical_Valid_HasNoProblems(string json, string id)
     {
-        Assert.Empty(RunbookValidator.ValidateCanonical(Parse(json), id));
+        Assert.Empty(RunbookValidator.ValidateCanonical(Parse(json), id, TestCatalog.Default));
     }
 
     [Theory]
@@ -41,7 +41,20 @@ public sealed class RunbookValidatorTests
     [InlineData("\"retries\": 2", "\"retries\": 4", "canonical.steps[1].retries")]
     public void Canonical_WithOneWrongField_ReportsOnlyThatPath(string original, string broken, string expectedPath)
     {
-        var problems = RunbookValidator.ValidateCanonical(Parse(Graph.Replace(original, broken)), "rb");
+        var problems = RunbookValidator.ValidateCanonical(Parse(Graph.Replace(original, broken)), "rb", TestCatalog.Default);
+
+        Assert.Equal(expectedPath, Assert.Single(problems).Path);
+    }
+
+    [Theory]
+    [InlineData("\"params\": {\"workflowId\": \"{{workflowId}}\"}", "\"params\": {\"target\": \"nowhere\", \"workflowId\": \"x\"}", "canonical.steps[1].params.target")]
+    [InlineData("\"params\": {\"workflowId\": \"{{workflowId}}\"}", "\"params\": {\"target\": \"services\", \"workflowId\": \"x\"}", "canonical.steps[1].params.operation")]
+    [InlineData("\"params\": {\"workflowId\": \"{{workflowId}}\"}", "\"params\": {\"other\": 1}", "canonical.steps[1].params.workflowId")]
+    [InlineData("\"http://counterparty-service/health\"", "\"http://169.254.169.254/latest\"", "canonical.steps[0].params.url")]
+    [InlineData("\"http://counterparty-service/health\"", "\"http://{{host}}/health\"", "canonical.steps[0].params.url")]
+    public void Canonical_StepThatDoesNotResolveToATarget_ReportsThePath(string original, string broken, string expectedPath)
+    {
+        var problems = RunbookValidator.ValidateCanonical(Parse(Graph.Replace(original, broken)), "rb", TestCatalog.Default);
 
         Assert.Equal(expectedPath, Assert.Single(problems).Path);
     }

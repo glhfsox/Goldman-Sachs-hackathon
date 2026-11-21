@@ -2,8 +2,8 @@ namespace AlertApi.Application.Exceptions;
 
 public abstract class ConflictException : AppException
 {
-    protected ConflictException(string details)
-        : base(409, "Conflict", details)
+    protected ConflictException(string details, Exception? innerException = null)
+        : base(409, "Conflict", details, innerException)
     {
     }
 }

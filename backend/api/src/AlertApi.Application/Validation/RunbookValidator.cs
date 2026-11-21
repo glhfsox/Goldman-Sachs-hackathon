@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
+using AlertApi.Application.Actions;
 using AlertApi.Application.Exceptions;
 using AlertApi.Application.Runbooks;
 
@@ -18,10 +19,6 @@ public static partial class RunbookValidator
     private static readonly string[] StepFields =
         ["id", "text", "action", "params", "approval", "when", "link", "needs", "if", "retries", "timeout_s"];
 
-    // shortcut: fixed list until the action registry (issue #82 step 2) replaces it
-    private static readonly string[] Actions =
-        ["http_get", "retry_workflow", "restart_service", "webhook", "ticket", "escalate"];
-
     public static List<ProblemItem> ValidateCreate(string? teamId, string? title, string? format, string? source)
     {
         var problems = new List<ProblemItem>();
@@ -34,8 +31,10 @@ public static partial class RunbookValidator
         return problems;
     }
 
-    public static List<ProblemItem> ValidateCanonical(JsonElement canonical, string runbookId)
+    public static List<ProblemItem> ValidateCanonical(JsonElement canonical, string runbookId, ActionCatalog catalog)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
+
         var problems = new List<ProblemItem>();
 
         if (!JsonChecks.RequireObject(canonical, "canonical", problems, CanonicalFields))
@@ -82,7 +81,7 @@ public static partial class RunbookValidator
 
         foreach (var step in steps.EnumerateArray())
         {
-            ValidateStep(step, $"canonical.steps[{index++}]", problems);
+            ValidateStep(step, $"canonical.steps[{index++}]", catalog, problems);
         }
 
         if (problems.Count == 0)
@@ -100,7 +99,7 @@ public static partial class RunbookValidator
             : [new ProblemItem("status", "must be one of: draft, active")];
     }
 
-    private static void ValidateStep(JsonElement step, string path, List<ProblemItem> problems)
+    private static void ValidateStep(JsonElement step, string path, ActionCatalog catalog, List<ProblemItem> problems)
     {
         if (!JsonChecks.RequireObject(step, path, problems, StepFields))
         {
@@ -120,7 +119,7 @@ public static partial class RunbookValidator
 
         if (step.TryGetProperty("action", out var action))
         {
-            JsonChecks.CheckOneOf(action, JsonChecks.Join(path, "action"), problems, Actions);
+            ValidateAction(step, action, path, catalog, problems);
         }
 
         if (step.TryGetProperty("when", out var when))
@@ -159,6 +158,26 @@ public static partial class RunbookValidator
 
         CheckRange(step, "retries", 0, 3, path, problems);
         CheckRange(step, "timeout_s", 1, 300, path, problems);
+    }
+
+    // The action must be registered and its params must resolve to a registered target (spec §5a of #73);
+    // {{placeholders}} are filled when a run starts, so here they only have to be present.
+    private static void ValidateAction(JsonElement step, JsonElement action, string path, ActionCatalog catalog, List<ProblemItem> problems)
+    {
+        var actionPath = JsonChecks.Join(path, "action");
+
+        if (action.ValueKind != JsonValueKind.String || !catalog.Actions.TryGetValue(action.GetString()!, out var descriptor))
+        {
+            problems.Add(new ProblemItem(actionPath, $"must be one of: {string.Join(", ", catalog.Actions.Keys.Order())}"));
+
+            return;
+        }
+
+        var parameters = step.TryGetProperty("params", out var value) && value.ValueKind == JsonValueKind.Object
+            ? value
+            : (JsonElement?)null;
+
+        ActionTargetResolver.Resolve(descriptor, parameters, catalog.Targets, path, problems);
     }
 
     private static void ValidateCondition(JsonElement condition, string path, List<ProblemItem> problems)

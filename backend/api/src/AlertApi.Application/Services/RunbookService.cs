@@ -20,6 +20,7 @@ public sealed partial class RunbookService : IRunbookService
     private const int MaxIdLength = 60;
 
     private readonly IRunbookRepository _repository;
+    private readonly IActionCatalogProvider _catalog;
     private readonly IReferenceDataQueries _queries;
     private readonly IConfigChangeOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
@@ -27,12 +28,14 @@ public sealed partial class RunbookService : IRunbookService
 
     public RunbookService(
         IRunbookRepository repository,
+        IActionCatalogProvider catalog,
         IReferenceDataQueries queries,
         IConfigChangeOutbox outbox,
         IUnitOfWork unitOfWork,
         TimeProvider timeProvider)
     {
         _repository = repository;
+        _catalog = catalog;
         _queries = queries;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
@@ -89,7 +92,7 @@ public sealed partial class RunbookService : IRunbookService
         var node = JsonNode.Parse(canonical.GetRawText())!.AsObject();
         node["id"] = id;
         var text = node.ToJsonString();
-        var problems = RunbookValidator.ValidateCanonical(RecordJson.ToElement(text), id);
+        var problems = RunbookValidator.ValidateCanonical(RecordJson.ToElement(text), id, await _catalog.GetAsync(cancellationToken));
 
         if (problems.Count > 0)
         {
@@ -113,7 +116,9 @@ public sealed partial class RunbookService : IRunbookService
 
         var runbook = await GetRequiredAsync(id, cancellationToken);
         var canonical = request.Canonical is { ValueKind: not JsonValueKind.Null } element ? element : (JsonElement?)null;
-        var problems = canonical is { } value ? RunbookValidator.ValidateCanonical(value, id) : [];
+        var problems = canonical is { } value
+            ? RunbookValidator.ValidateCanonical(value, id, await _catalog.GetAsync(cancellationToken))
+            : [];
 
         if (request.Status is not null)
         {
@@ -164,8 +169,8 @@ public sealed partial class RunbookService : IRunbookService
             throw new RunbookStateConflictException(id, "only an active runbook with a canonical form can be accepted");
         }
 
-        // The person accepts the graph they saw, never a newer one saved meanwhile.
-        // shortcut: no concurrency token, so a PUT racing this request by milliseconds can still lose; add one before auto-start (#82 step 4).
+        // The person accepts the graph they saw, never a newer one saved meanwhile; `version` is a concurrency token,
+        // so a PUT saved between this read and the save below makes the save fail with 409.
         if (runbook.Version != version)
         {
             throw new RunbookStateConflictException(id, $"version {version} is not the current version {runbook.Version}");

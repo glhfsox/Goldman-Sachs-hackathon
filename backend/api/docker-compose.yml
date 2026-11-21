@@ -28,6 +28,12 @@ services:
       timeout: 5s
       retries: 10
 
+  # Where runbook actions land in the demo (seeded action_targets point here).
+  mock-target:
+    build: ../mock-target
+    ports:
+      - "8003:8003"
+
   api:
     build: .
     ports:
@@ -44,3 +50,5 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      mock-target:
+        condition: service_started

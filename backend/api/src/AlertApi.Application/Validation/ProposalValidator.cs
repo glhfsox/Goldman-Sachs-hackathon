@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using AlertApi.Application.Actions;
 using AlertApi.Application.Exceptions;
 
 namespace AlertApi.Application.Validation;
@@ -18,8 +19,10 @@ public static class ProposalValidator
 
     private const int MaxBodyBytes = 64 * 1024;
 
-    public static List<ProblemItem> Validate(string? kind, JsonElement? body)
+    public static List<ProblemItem> Validate(string? kind, JsonElement? body, ActionCatalog catalog)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
+
         var problems = new List<ProblemItem>();
 
         if (string.IsNullOrWhiteSpace(kind) || !Kinds.Contains(kind))
@@ -47,7 +50,7 @@ public static class ProposalValidator
         {
             case Runbook:
                 RequireStrings(value, bodyProblems, "team_id", "title");
-                ValidateCanonical(value, bodyProblems);
+                ValidateCanonical(value, catalog, bodyProblems);
                 break;
             case RuleSeverity:
                 RequireStrings(value, bodyProblems, "rule_id", "team_id");
@@ -83,7 +86,7 @@ public static class ProposalValidator
         }
     }
 
-    private static void ValidateCanonical(JsonElement body, List<ProblemItem> problems)
+    private static void ValidateCanonical(JsonElement body, ActionCatalog catalog, List<ProblemItem> problems)
     {
         if (!JsonChecks.TryGetRequired(body, string.Empty, "canonical", problems, out var canonical))
         {
@@ -95,6 +98,6 @@ public static class ProposalValidator
             ? idElement.GetString()!
             : string.Empty;
 
-        problems.AddRange(RunbookValidator.ValidateCanonical(canonical, id));
+        problems.AddRange(RunbookValidator.ValidateCanonical(canonical, id, catalog));
     }
 }

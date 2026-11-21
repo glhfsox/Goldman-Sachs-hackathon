@@ -22,6 +22,46 @@ namespace AlertApi.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("AlertApi.Domain.Models.ActionTarget", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BaseUrl")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("base_url");
+
+                    b.Property<string>("Operations")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("operations");
+
+                    b.Property<string>("Origins")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("origins");
+
+                    b.Property<string>("SecretRef")
+                        .HasColumnType("text")
+                        .HasColumnName("secret_ref");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("PK_action_targets");
+
+                    b.ToTable("action_targets", (string)null);
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.Alert", b =>
                 {
                     b.Property<string>("Id")
@@ -439,6 +479,7 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasColumnName("updated_at");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer")
                         .HasColumnName("version");
 

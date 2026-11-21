@@ -23,6 +23,7 @@ public sealed class ProposalService : IProposalService
     private readonly IReferenceDataQueries _queries;
     private readonly IRuleService _rules;
     private readonly IRunbookService _runbooks;
+    private readonly IActionCatalogProvider _catalog;
     private readonly IUiPublisher _ui;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
@@ -34,6 +35,7 @@ public sealed class ProposalService : IProposalService
         IReferenceDataQueries queries,
         IRuleService rules,
         IRunbookService runbooks,
+        IActionCatalogProvider catalog,
         IUiPublisher ui,
         IUnitOfWork unitOfWork,
         TimeProvider timeProvider)
@@ -44,6 +46,7 @@ public sealed class ProposalService : IProposalService
         _queries = queries;
         _rules = rules;
         _runbooks = runbooks;
+        _catalog = catalog;
         _ui = ui;
         _unitOfWork = unitOfWork;
         _timeProvider = timeProvider;
@@ -64,7 +67,7 @@ public sealed class ProposalService : IProposalService
             throw new AlertNotFoundException(alertId);
         }
 
-        var problems = ProposalValidator.Validate(request.Kind, request.Body);
+        var problems = ProposalValidator.Validate(request.Kind, request.Body, await _catalog.GetAsync(cancellationToken));
 
         if (problems.Count > 0)
         {

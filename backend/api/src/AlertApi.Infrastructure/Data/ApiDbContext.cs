@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 
+using AlertApi.Application.Exceptions;
 using AlertApi.Application.Interfaces;
 using AlertApi.Domain.Models;
 
@@ -38,9 +39,24 @@ public class ApiDbContext : DbContext, IUnitOfWork
 
     public DbSet<Runbook> Runbooks => Set<Runbook>();
 
+    public DbSet<ActionTarget> ActionTargets => Set<ActionTarget>();
+
     public DbSet<Proposal> Proposals => Set<Proposal>();
 
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
+
+    // Services save through IUnitOfWork; a lost race on a concurrency token (runbooks.version) becomes a 409.
+    async Task<int> IUnitOfWork.SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            throw new ConcurrentUpdateException(exception);
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
