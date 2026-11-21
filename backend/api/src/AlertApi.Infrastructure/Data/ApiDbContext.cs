@@ -28,6 +28,14 @@ public class ApiDbContext : DbContext, IUnitOfWork
 
     public DbSet<UserPreferences> Preferences => Set<UserPreferences>();
 
+    public DbSet<Alert> Alerts => Set<Alert>();
+
+    public DbSet<AlertEvent> AlertEvents => Set<AlertEvent>();
+
+    public DbSet<Notification> Notifications => Set<Notification>();
+
+    public DbSet<SchemaSample> SchemaSamples => Set<SchemaSample>();
+
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

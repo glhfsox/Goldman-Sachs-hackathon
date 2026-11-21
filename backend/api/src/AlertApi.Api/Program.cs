@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using AlertApi.Api.Endpoints;
 using AlertApi.Api.Infrastructure;
 using AlertApi.Application.Interfaces;
+using AlertApi.Application.Serialization;
 using AlertApi.Application.Services;
 using AlertApi.Domain.Repositories;
 using AlertApi.Infrastructure.Data;
@@ -32,9 +33,19 @@ builder.Services.AddScoped<IRuleRepository, RuleRepository>();
 builder.Services.AddScoped<IRuleService, RuleService>();
 builder.Services.AddScoped<IMappingRepository, MappingRepository>();
 builder.Services.AddScoped<IMappingService, MappingService>();
+builder.Services.AddScoped<IAlertRepository, AlertRepository>();
+builder.Services.AddScoped<IAlertEventRepository, AlertEventRepository>();
+builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+builder.Services.AddScoped<ISchemaSampleRepository, SchemaSampleRepository>();
+builder.Services.AddScoped<IAlertService, AlertService>();
+builder.Services.AddScoped<IActivityService, ActivityService>();
+builder.Services.AddScoped<ISchemaSampleService, SchemaSampleService>();
+builder.Services.AddScoped<IActivityRecordHandler, ActivityRecordHandler>();
 builder.Services.AddScoped<IReferenceDataQueries, ReferenceDataQueries>();
 builder.Services.AddScoped<IPreferencesRepository, PreferencesRepository>();
 builder.Services.AddScoped<IPreferencesService, PreferencesService>();
+builder.Services.AddSingleton(new ActivityConsumerOptions { Brokers = kafkaBrokers });
+builder.Services.AddHostedService<ActivityConsumer>();
 builder.Services.AddSingleton<IEventPublisher>(_ => new KafkaEventPublisher(kafkaBrokers));
 builder.Services.AddHostedService(provider => new OutboxPublisher(
     provider.GetRequiredService<IServiceScopeFactory>(),
@@ -44,7 +55,10 @@ builder.Services.AddHostedService(provider => new OutboxPublisher(
 
 // Responses use snake_case like every record in contracts/ (first_seen, rule_id).
 builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower);
+{
+    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower;
+    options.SerializerOptions.Converters.Add(new UtcTimestampConverter());
+});
 
 // The spec and the UI are for developers: on in Development and in the local Docker run, off in production.
 var apiDocsEnabled = builder.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("ENABLE_SWAGGER");
@@ -79,6 +93,8 @@ app.MapRuleEndpoints();
 app.MapMappingEndpoints();
 app.MapTeamEndpoints();
 app.MapUserEndpoints();
+app.MapAlertEndpoints();
+app.MapSchemaSampleEndpoints();
 
 app.Run();
 

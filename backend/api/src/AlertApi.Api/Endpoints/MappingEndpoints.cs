@@ -21,7 +21,7 @@ public static class MappingEndpoints
 
         group.MapPut("{id}", Save)
             .WithName("SaveMapping")
-            .WithSummary("Creates or replaces a mapping; 422 invalid_mapping names every wrong path. The processor applies it within 5 s.");
+            .WithSummary("Creates or replaces a mapping; 422 invalid_mapping names every wrong path. With ?fingerprint= that schema sample becomes mapped. The processor applies it within 5 s.");
 
         return app;
     }
@@ -38,10 +38,11 @@ public static class MappingEndpoints
     private static async Task<Ok<JsonElement>> Save(
         string id,
         [FromBody] JsonElement request,
+        [FromQuery] string? fingerprint,
         IMappingService service,
         CancellationToken cancellationToken)
     {
-        var mapping = await service.SaveAsync(id, request, cancellationToken);
+        var mapping = await service.SaveAsync(id, request, fingerprint, cancellationToken);
 
         return TypedResults.Ok(mapping);
     }

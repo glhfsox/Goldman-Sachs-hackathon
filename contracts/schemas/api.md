@@ -36,6 +36,8 @@ Every insert, update or soft-delete below is published to Kafka `config.changes`
 | `kind` | text, not null | `opened`, `severity_raised`, `reopened`, `acked`, `resolved`, `notification_sent`, `notification_failed`, `notification_suppressed`, `action_requested`, `action_approved`, `action_rejected`, `action_finished`, `proposal_created`, `proposal_decided` |
 | `data` | jsonb, not null | For the `action_*` kinds: `{"action_run": {id, runbook_id, step_index, action, params, status, result}}` |
 
+For rows that come from `alerts.changes`, `data` is `{"severity": ..., "count": ...}` of the alert at that change. `count_threshold` changes update the `alerts` copy only and add no row. A record whose id is already a row is skipped.
+
 Rows come from three places: `alerts.changes` (alert state), `alerts.timeline` (notifications), and the
 api's own actions (action runs, proposals). After storing a row the api publishes a `timeline` message
 on Redis `ui.alerts`.
@@ -88,9 +90,9 @@ Example row:
 
 | Table | Columns | Fed by |
 |---|---|---|
-| `alerts` | `id` text primary key, then every field of the [Alert object](../api.md) as a column (`fields` and `sample_event` jsonb) | Kafka `alerts.changes` (insert or replace); `count` and `last_seen` also from Redis `ui.alerts` `count` messages |
+| `alerts` | `id` text primary key, then every field of the [Alert object](../api.md) as a column (`fields` and `sample_event` jsonb) | Kafka `alerts.changes` (insert or replace). Not built yet: `count` and `last_seen` from Redis `ui.alerts` `count` messages (comes with the WebSocket) |
 | `notifications` | `id` text primary key, `alert_id` text, `user_id` text, `channel` text, `status` text, `reason` text, `send_at` timestamptz, `sent_at` timestamptz, `error` text | Kafka `alerts.timeline`, the `notification` object in `data` |
-| `schema_samples` | `fingerprint` text primary key, `source_id` text, `sample` jsonb, `status` text (`pending` \| `mapped` \| `failed`), `created_at` timestamptz | Kafka `schema.samples` (insert as `pending`); `mapped` when a mapping is saved with `PUT /mappings/{id}?fingerprint=`; `failed` through `PUT /schema-samples/{fingerprint}` ([../api.md](../api.md)) |
+| `schema_samples` | `fingerprint` text primary key, `source_id` text, `sample` jsonb, `status` text (`pending` \| `mapped` \| `failed`), `error` text (why it failed), `created_at` timestamptz | Kafka `schema.samples` (insert as `pending`); a repeated record for a known fingerprint is ignored; `mapped` when a mapping is saved with `PUT /mappings/{id}?fingerprint=`; `failed` through `PUT /schema-samples/{fingerprint}` ([../api.md](../api.md)) |
 
 The api's `alerts` is a copy: the processor's table is the truth. An ack or resolve is published to
 `alerts.changes` and takes effect in every copy, this one included, when that record is consumed.
