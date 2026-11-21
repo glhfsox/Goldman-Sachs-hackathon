@@ -112,6 +112,37 @@ curl -X POST http://localhost:8001/ingest/alertmanager-http \
 Any JSON works. An unknown shape appears in the UI as unmapped and gets a mapping within about
 15 seconds (needs the Anthropic key).
 
+## Measured performance
+
+One full run on 21-11 (one Mac, Apple Silicon, every service in Docker Desktop, so all clocks are the same clock).
+Background load from the sources simulator at 3,000 msg/s for 120 s (90% Kafka, 10% HTTP), plus 100 probe events
+over HTTP, each opening its own alert routed to UI, email and SMS. Full report:
+[docs/evaluation/20261121065848.md](docs/evaluation/20261121065848.md).
+
+| Metric | Result |
+|---|---|
+| Ingested (`events.raw`), sustained / peak | 2,955 / 4,778 events/s |
+| Processed (rules, dedup, alert state), sustained / peak | 2,955 / 5,524 events/s |
+| Processor lag at the end of the load / time to drain | 27 events / 1.0 s |
+| Sent by the simulator / failed | 354,780 / 0 |
+| Probes lost | 0 of 100 |
+| Ingest → alert visible in the UI (WebSocket), p50 / p95 / p99 | 82 / 133 / 150 ms |
+| Ingest → email sent (MailHog), p50 / p95 / p99 | 84 / 138 / 159 ms |
+| Ingest → SMS sent (mock gateway), p50 / p95 / p99 | 87 / 135 / 154 ms |
+| Background events that opened no new alert (dedup into open alerts) | 100% |
+
+The judges of the AI worker (TypeSafe Jev), on labelled cases (labels written with AI help, not yet reviewed):
+
+| Judge | Right | Dangerous misses |
+|---|---|---|
+| Run risk check (`auto` run starts by itself or waits for a person) | 25 of 30 (83%) | 0 (no risky run cleared) |
+| Run start mode proposal (`auto` / `approval`) | 15 of 16 (94%) | 0 (no `auto` proposed where it should not be) |
+| Rule severity proposal | 9 of 20 (45%) | 0 (never proposed a lower severity than it should); the misses are proposals it did not make |
+
+Reproduce, with the stack up: `bash data/simulator/check.sh` once, then
+`set -a; . backend/ai-worker/.env; set +a; uv run scripts/evaluate.py --rate 3000 --duration 120 --probes 100`
+(`--skip-jev` without a TypeSafe key). It writes `docs/evaluation/<time>.md` and `.json`.
+
 ## What is mocked
 
 | Real thing | Here |

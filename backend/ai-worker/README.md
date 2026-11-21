@@ -120,6 +120,9 @@ mix, the window). The only user ids sent are those the rule's `route` names; the
 accepting one as a person set the rule's `severity`) and the stub. A `404` on filing a proposal (the api has not read
 the alert from `alerts.changes` yet) retries the job instead of failing it.
 
+`evals/severity_golden.jsonl` holds 20 cases (10 `first`, 10 `history`; labels written by an AI, not yet reviewed by a person); `scripts/eval_severity.py` runs them through `judge.handle` against the real Jev (all three eval scripts take `--json PATH` for a summary object).
+Measured on 21-11: 9 of 20 right, no proposal lower than an `error`/`critical` label; all 11 misses filed nothing (Jev kept the event's or the rule's severity, or answered under confidence 0.5), so it never lowered a noisy rule.
+
 ## Run judges (`ai_worker/runs.py`, issue #75)
 
 Two more Jev judges, for runbook runs (the run model of issue #73). On its own a judge can only make a run more
