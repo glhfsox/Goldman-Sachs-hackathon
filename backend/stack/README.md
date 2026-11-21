@@ -16,7 +16,7 @@ one copy. This folder holds only what the full stack adds:
 |---|---|
 | `ai-worker.override.yml` | Applied to `backend/ai-worker/docker-compose.yml`: the ai-worker calls the real api (`http://api:8000/api`); its `stub-api` gets profile `stub` and no port, so it does not start and does not take port 8000 |
 | `docker-compose.yml` | The one-shot `seed` service |
-| `seed/` | What `seed` loads through the api's REST endpoints ([contracts/api.md](../../contracts/api.md)): the runbook `settlement-timeout` (YAML source plus its canonical form, saved `active`, so no Claude key is needed), the four mappings of [contracts/rules.md](../../contracts/rules.md) §3 and the four example rules of §4. Every call is create-or-replace: `docker compose run --rm seed` again changes nothing but the runbook's version |
+| `seed/` | What `seed` loads through the api's REST endpoints ([contracts/api.md](../../contracts/api.md)): the runbooks `settlement-retry` (safe steps, risk `auto`, accepted by anna, with an `auto` start row: the demo's automatic run) and `settlement-timeout` (with an `approval` step: a person starts it from the alert), each as YAML source plus its canonical form, saved `active` so no Claude key is needed, the four mappings of [contracts/rules.md](../../contracts/rules.md) §3 and the four example rules of §4. Every call is create-or-replace: `docker compose run --rm seed` again changes nothing but the runbook's version |
 
 The api seeds sources, teams, users and preferences itself on first start; `seed` adds the rest, and every
 consumer copies it from `config.changes`.

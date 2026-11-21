@@ -50,5 +50,5 @@
     ],
     "color": "red"
   },
-  "runbook_id": "settlement-timeout"
+  "runbook_id": "settlement-retry"
 }

@@ -1,0 +1,6 @@
+{
+  "team_id": "settlements",
+  "title": "Settlement retry",
+  "format": "yaml",
+  "source": "runbook: settlement-retry\nmatches: {type: WORKFLOW_FAILED, \"error.code\": TIMEOUT}\nsteps:\n  - check: \"Is counterparty-service healthy?\"\n    action: http_get\n    url: \"http://counterparty-service/health\"\n  - action: retry_workflow\n    workflowId: \"{{workflowId}}\"\n"
+}
