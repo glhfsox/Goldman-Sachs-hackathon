@@ -9,8 +9,11 @@ Timestamps are ISO 8601 UTC with milliseconds. Ids are opaque strings (ULID or U
 | Response | Meaning |
 |---|---|
 | `202 {"event_id": "..."}` | Kafka has confirmed the event. Never returned earlier. |
-| `404` | Unknown or disabled `source_id` |
-| `503` | Kafka unavailable; the caller retries |
+| `404` | Unknown or disabled `source_id`, or a `source_id` of a `kafka` source (those are read from their topic only) |
+| `413` | Body larger than 64 KiB (65536 bytes) |
+| `503` | Kafka did not confirm within about 4 s; the caller retries |
+
+The body is the event: the `Content-Type` header is ignored. Errors are `application/problem+json`.
 
 A Kafka source is a `sources` row of kind `kafka` naming a `source.*` topic on the separate sources
 cluster (`SOURCE_KAFKA_BROKERS`), e.g. `{"id": "workflows-kafka", "kind": "kafka", "config": {"topic": "source.workflows"}}`.
@@ -32,7 +35,11 @@ What the sources send (source ids, `source.*` topics and records, HTTP sender be
 }
 ```
 
-`payload` is the parsed JSON value when the body is valid JSON, otherwise the body as a string.
+`event_id` is a UUID string, unique per record, and the idempotency key for consumers. HTTP sources: UUID v7, new for
+every request (a sender retry gets a new id).
+
+`payload` is the parsed JSON value when the body is valid JSON, otherwise the body as a string (bytes that are not valid UTF-8 become U+FFFD).
+The record key is `source_id`.
 `received_at` is the start of the latency measurement (ingest → delivery).
 
 ## 3. Envelope: built by the processor, never dropped

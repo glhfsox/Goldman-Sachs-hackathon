@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ingest.Api\Ingest.Api.csproj" />
     <ProjectReference Include="..\..\src\Ingest.Infrastructure\Ingest.Infrastructure.csproj" />
+    <PackageReference Include="Confluent.Kafka" Version="2.12.0" />
   </ItemGroup>
 
 </Project>
