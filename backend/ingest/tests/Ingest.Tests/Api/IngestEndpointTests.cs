@@ -39,7 +39,7 @@ public sealed class IngestEndpointTests : IClassFixture<PostgresFixture>, IClass
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         var record = Consume(consumer, body.GetProperty("event_id").GetString()!);
-        Assert.Equal("alertmanager-http", record.Message.Key);
+        Assert.Equal(body.GetProperty("event_id").GetString(), record.Message.Key);
         var value = JsonDocument.Parse(record.Message.Value).RootElement;
         Assert.Equal("alertmanager-http", value.GetProperty("source_id").GetString());
         Assert.Equal("HighErrorRate", value.GetProperty("payload").GetProperty("alertname").GetString());

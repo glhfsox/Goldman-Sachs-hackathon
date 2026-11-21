@@ -43,7 +43,7 @@ Kafka sources: UUID v5 of `source_id`, topic, partition and offset (namespace `6
 Ingest reads a Kafka source's topic from its beginning on the first start and commits an offset only after Kafka confirmed the republished record.
 
 `payload` is the parsed JSON value when the body is valid JSON, otherwise the body as a string (bytes that are not valid UTF-8 become U+FFFD).
-The record key is `source_id`.
+The record key is `event_id`, so the records of one source (even a single busy one) spread over all partitions and every Processor worker gets a share. There is no order between the records of one source; consumers must not rely on it (the Processor does not). Until 21-11 the key was `source_id`.
 `received_at` is the start of the latency measurement (ingest → delivery).
 
 ## 3. Envelope: built by the processor, never dropped

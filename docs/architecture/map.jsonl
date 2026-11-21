@@ -1,7 +1,7 @@
 {"id":"sources","kind":"external","purpose":"Third-party systems that emit events over HTTP webhooks or to the sources Kafka cluster","out":["raw payload"]}
 {"id":"source_kafka","kind":"topic","area":"infra","purpose":"Separate Kafka cluster with source.* topics; third-party systems publish, only ingest consumes"}
 {"id":"ingest","kind":"service","area":"backend","purpose":"Source adapters: receive a payload, stamp event_id, source_id and received_at, enqueue it","in":["raw payload","source configs"],"out":["raw event"]}
-{"id":"events_raw","kind":"topic","area":"infra","purpose":"Kafka topic events.raw: durable buffer of raw events, keyed by source_id"}
+{"id":"events_raw","kind":"topic","area":"infra","purpose":"Kafka topic events.raw: durable buffer of raw events, keyed by event_id"}
 {"id":"processor","kind":"service","area":"backend","purpose":"Applies schema mappings (parks unmapped events until one arrives), matches rules, deduplicates, owns alert state, auto-resolves quiet alerts","in":["raw event","rules","mappings"],"out":["alert change","schema sample"]}
 {"id":"alerts_changes","kind":"topic","area":"infra","purpose":"Kafka topic alerts.changes: alert state changes, keyed by alert_id"}
 {"id":"config_changes","kind":"topic","area":"infra","purpose":"Kafka topic config.changes: compacted stream of rules, mappings, sources, teams, preferences and runbooks, keyed by kind:id"}
