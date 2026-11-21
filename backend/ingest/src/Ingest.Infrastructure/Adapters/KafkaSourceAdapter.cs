@@ -6,6 +6,7 @@ using Ingest.Application.Exceptions;
 using Ingest.Application.Interfaces;
 using Ingest.Domain.Services;
 using Ingest.Domain.ValueObjects;
+using Ingest.Infrastructure.Logging;
 
 namespace Ingest.Infrastructure.Adapters;
 
@@ -21,6 +22,7 @@ public sealed class KafkaSourceAdapter : ISourceAdapter
     private readonly IRawEventPublisher _publisher;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<KafkaSourceAdapter> _logger;
+    private readonly LogThrottle _logThrottle;
     private readonly SemaphoreSlim _inFlight;
     private readonly int _maxInFlight;
     private readonly OffsetTracker _tracker = new();
@@ -33,6 +35,7 @@ public sealed class KafkaSourceAdapter : ISourceAdapter
         IRawEventPublisher publisher,
         TimeProvider timeProvider,
         ILogger<KafkaSourceAdapter> logger,
+        LogThrottle logThrottle,
         int maxInFlight = DefaultMaxInFlight)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(brokers);
@@ -42,6 +45,7 @@ public sealed class KafkaSourceAdapter : ISourceAdapter
         _publisher = publisher;
         _timeProvider = timeProvider;
         _logger = logger;
+        _logThrottle = logThrottle;
         _maxInFlight = maxInFlight;
         _inFlight = new SemaphoreSlim(maxInFlight, maxInFlight);
     }
@@ -155,7 +159,11 @@ public sealed class KafkaSourceAdapter : ISourceAdapter
         catch (ConsumeException exception)
         {
             // A topic may not exist yet while the sources cluster starts; keep trying.
-            _logger.LogWarning("Cannot read from {Brokers}: {Reason}", _brokers, exception.Error.Reason);
+            if (_logThrottle.TryAcquire($"kafka-source-read/{_brokers}", out var suppressed))
+            {
+                _logger.LogWarning("Cannot read from {Brokers}: {Reason} ({Suppressed} similar lines hidden)", _brokers, exception.Error.Reason, suppressed);
+            }
+
             await Task.Delay(RetryDelay, cancellationToken);
 
             return;
@@ -210,7 +218,11 @@ public sealed class KafkaSourceAdapter : ISourceAdapter
                 }
                 catch (EventPublishFailedException exception)
                 {
-                    _logger.LogWarning(exception, "Cannot publish {TopicPartitionOffset}; retrying", $"{partition}@{offset}");
+                    if (_logThrottle.TryAcquire("kafka-source-publish", out var suppressed))
+                    {
+                        _logger.LogWarning(exception, "Cannot publish {TopicPartitionOffset}; retrying ({Suppressed} similar lines hidden)", $"{partition}@{offset}", suppressed);
+                    }
+
                     await Task.Delay(RetryDelay, cancellationToken);
                 }
             }
@@ -245,7 +257,10 @@ public sealed class KafkaSourceAdapter : ISourceAdapter
         catch (KafkaException exception)
         {
             // After a rebalance the partition is gone; its messages are read again by the new owner.
-            _logger.LogWarning("Cannot commit offsets: {Reason}", exception.Error.Reason);
+            if (_logThrottle.TryAcquire($"kafka-source-commit/{_brokers}", out var suppressed))
+            {
+                _logger.LogWarning("Cannot commit offsets: {Reason} ({Suppressed} similar lines hidden)", exception.Error.Reason, suppressed);
+            }
         }
     }
 

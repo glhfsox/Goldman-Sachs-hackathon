@@ -55,6 +55,7 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 |---|---|---|
 | `KAFKA_BROKERS` | all backend services | `kafka:9092` (internal cluster) |
 | `SOURCE_KAFKA_BROKERS` | ingest | `kafka-sources:9092` (sources cluster) |
+| `LOG_THROTTLE_SECONDS` | ingest | A repeating failure (Kafka unreachable, database error) is logged at most once per this many seconds per error kind, with the count of hidden lines; default `10`, `0` logs every time |
 | `ENABLE_SWAGGER` | ingest | `true` turns on the OpenAPI spec (`/openapi/v1.json`) and Swagger UI (`/swagger`); also on in Development, off by default |
 | `DATABASE_URL` | all backend services, each its own value | `postgres://alerts:alerts@processor-db:5432/processor` (hosts and database names: [storage.md](storage.md)) |
 | `API_URL` | ai-worker | `http://api:8000` |

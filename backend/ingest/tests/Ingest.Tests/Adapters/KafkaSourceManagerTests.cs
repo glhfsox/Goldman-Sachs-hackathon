@@ -10,6 +10,7 @@ using Ingest.Domain.Services;
 using Ingest.Domain.ValueObjects;
 using Ingest.Infrastructure.Adapters;
 using Ingest.Infrastructure.Kafka;
+using Ingest.Infrastructure.Logging;
 using Ingest.Tests.Infrastructure;
 
 namespace Ingest.Tests.Adapters;
@@ -42,7 +43,7 @@ public sealed class KafkaSourceManagerTests : IClassFixture<KafkaFixture>
         using var publisher = new KafkaRawEventPublisher(_kafka.Brokers);
         var manager = new KafkaSourceManager(
             registry,
-            brokers => new KafkaSourceAdapter(brokers, publisher, TimeProvider.System, NullLogger<KafkaSourceAdapter>.Instance),
+            brokers => new KafkaSourceAdapter(brokers, publisher, TimeProvider.System, NullLogger<KafkaSourceAdapter>.Instance, new LogThrottle(TimeSpan.Zero, TimeProvider.System)),
             _kafka.Brokers,
             TimeSpan.FromMilliseconds(300),
             NullLogger<KafkaSourceManager>.Instance);
