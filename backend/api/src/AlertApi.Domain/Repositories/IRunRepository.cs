@@ -6,6 +6,8 @@ public interface IRunRepository
 {
     Task<RunbookRun?> GetByIdAsync(string id, CancellationToken cancellationToken = default);
 
+    Task<RunbookRun?> GetLatestByAlertIdAsync(string alertId, CancellationToken cancellationToken = default);
+
     Task<bool> HasLiveRunAsync(string alertId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ActionRun>> GetNodesAsync(string runId, CancellationToken cancellationToken = default);

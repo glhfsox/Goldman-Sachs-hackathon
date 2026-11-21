@@ -14,6 +14,7 @@ public sealed class AlertService : IAlertService
     private readonly IAlertRepository _alerts;
     private readonly IAlertEventRepository _events;
     private readonly INotificationRepository _notifications;
+    private readonly IRunRepository _runs;
     private readonly IReferenceDataQueries _queries;
     private readonly IAlertChangeOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
@@ -23,6 +24,7 @@ public sealed class AlertService : IAlertService
         IAlertRepository alerts,
         IAlertEventRepository events,
         INotificationRepository notifications,
+        IRunRepository runs,
         IReferenceDataQueries queries,
         IAlertChangeOutbox outbox,
         IUnitOfWork unitOfWork,
@@ -35,6 +37,7 @@ public sealed class AlertService : IAlertService
         _alerts = alerts;
         _events = events;
         _notifications = notifications;
+        _runs = runs;
     }
 
     public async Task<IReadOnlyList<AlertResponse>> GetAllAsync(
@@ -54,13 +57,17 @@ public sealed class AlertService : IAlertService
             ?? throw new AlertNotFoundException(id);
         var timeline = await _events.GetByAlertIdAsync(id, cancellationToken);
         var notifications = await _notifications.GetByAlertIdAsync(id, cancellationToken);
+        var run = await _runs.GetLatestByAlertIdAsync(id, cancellationToken);
+        var progress = run is null
+            ? null
+            : RunProgressResponse.From(run, await _runs.GetNodesAsync(run.Id, cancellationToken));
 
         return new AlertDetailResponse(
             AlertResponse.From(alert),
             Incident: null,
             timeline.Select(AlertEventResponse.From).ToList(),
             notifications.Select(NotificationResponse.From).ToList(),
-            Runbook: null);
+            Runbook: progress);
     }
 
     public async Task<AlertResponse> AckAsync(string id, string? userId, CancellationToken cancellationToken = default)

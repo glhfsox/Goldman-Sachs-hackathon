@@ -210,6 +210,54 @@ public sealed class RunEndpointTests : IClassFixture<PostgresFixture>
     }
 
     [Fact]
+    public async Task AlertDetail_ShowsTheLatestRunsProgress_AndNullBeforeAnyRun()
+    {
+        using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
+        using var client = factory.CreateClient();
+        await Prepare(factory, client, canonical: """
+            {"canonical": {"id": "settlement-timeout", "title": "T",
+             "steps": [{"id": "look", "text": "Look at the dashboard"}, {"id": "post", "text": "Post an update", "needs": ["look"]}]},
+             "status": "active"}
+            """);
+
+        var before = await client.GetFromJsonAsync<JsonElement>("/api/alerts/alert-1");
+        var run = await (await Start(client, "anna")).Content.ReadFromJsonAsync<JsonElement>();
+        var id = run.GetProperty("id").GetString();
+        var started = (await client.GetFromJsonAsync<JsonElement>("/api/alerts/alert-1")).GetProperty("runbook");
+        await Post(client, $"/api/runs/{id}/nodes/look/done", "anna");
+        var ticked = (await client.GetFromJsonAsync<JsonElement>("/api/alerts/alert-1")).GetProperty("runbook");
+        await Post(client, $"/api/runs/{id}/nodes/post/done", "anna");
+        var finished = (await client.GetFromJsonAsync<JsonElement>("/api/alerts/alert-1")).GetProperty("runbook");
+
+        Assert.Equal(JsonValueKind.Null, before.GetProperty("runbook").ValueKind);
+        Assert.Equal(id, started.GetProperty("run_id").GetString());
+        Assert.Equal("settlement-timeout", started.GetProperty("runbook_id").GetString());
+        Assert.Equal("running", started.GetProperty("status").GetString());
+        Assert.Equal((2, 0), (started.GetProperty("steps_total").GetInt32(), started.GetProperty("steps_done").GetInt32()));
+        Assert.Equal(1, ticked.GetProperty("steps_done").GetInt32());
+        Assert.Equal(["succeeded", "pending"], ticked.GetProperty("steps").EnumerateArray().Select(step => step.GetProperty("status").GetString()));
+        Assert.Equal("done", finished.GetProperty("status").GetString());
+        Assert.Equal(2, finished.GetProperty("steps_done").GetInt32());
+    }
+
+    [Fact]
+    public async Task AlertDetail_ForACancelledRun_ShowsCancelledSteps_AndItStaysTheLatest()
+    {
+        using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
+        using var client = factory.CreateClient();
+        await Prepare(factory, client);
+        var run = await (await Start(client, "anna")).Content.ReadFromJsonAsync<JsonElement>();
+
+        await Post(client, $"/api/runs/{run.GetProperty("id").GetString()}/cancel", "anna");
+        var progress = (await client.GetFromJsonAsync<JsonElement>("/api/alerts/alert-1")).GetProperty("runbook");
+
+        Assert.Equal("cancelled", progress.GetProperty("status").GetString());
+        Assert.Equal(4, progress.GetProperty("steps_total").GetInt32());
+        Assert.Equal(0, progress.GetProperty("steps_done").GetInt32());
+        Assert.All(progress.GetProperty("steps").EnumerateArray(), step => Assert.Equal("cancelled", step.GetProperty("status").GetString()));
+    }
+
+    [Fact]
     public async Task GetRun_ForAnUnknownId_Is404()
     {
         using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);

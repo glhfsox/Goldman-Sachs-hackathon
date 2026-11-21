@@ -81,8 +81,11 @@ Saving a runbook or accepting it while another request changed the same runbook 
 A `Runbook` is `{id, team_id, title, format, source, canonical, status, version, accepted_by, accepted_at, updated_at}`;
 `canonical` is `null` on a draft.
 
-`incident` and `runbook` in `GET /alerts/{id}` are `null` until incidents and runbooks are built. `runbook`, once built, is the canonical runbook ([runbooks.md](runbooks.md)) with every
-`{{placeholder}}` already filled from the alert's `sample_event` (not built yet; step 6 of #82 adds the run to it).
+`incident` in `GET /alerts/{id}` is `null` until incidents are built. `runbook` is how far the alert's latest run has got, or `null`
+when no run was started: `{run_id, runbook_id, status, steps_total, steps_done, steps: [{node, status}]}`. `status` is the run's
+(`scheduled`, `running`, `done`, `failed`, `cancelled`); a step's is its node's ([runbooks.md](runbooks.md) §2). `steps_done` counts
+`succeeded` and `skipped` steps, so a text-only step counts once a person ticks it. The UI refetches the alert on the
+`timeline` message the api pushes after every run or step change.
 
 Each item of `notifications` carries what the UI needs for "why you got this / why not":
 `{id, user_id, channel, status, reason, send_at, sent_at, error}`.
