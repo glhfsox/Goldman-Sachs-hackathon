@@ -23,6 +23,7 @@ public sealed class ProposalService : IProposalService
     private readonly IReferenceDataQueries _queries;
     private readonly IRuleService _rules;
     private readonly IRunbookService _runbooks;
+    private readonly IRunbookStartService _starts;
     private readonly IActionCatalogProvider _catalog;
     private readonly IUiPublisher _ui;
     private readonly IUnitOfWork _unitOfWork;
@@ -35,6 +36,7 @@ public sealed class ProposalService : IProposalService
         IReferenceDataQueries queries,
         IRuleService rules,
         IRunbookService runbooks,
+        IRunbookStartService starts,
         IActionCatalogProvider catalog,
         IUiPublisher ui,
         IUnitOfWork unitOfWork,
@@ -46,6 +48,7 @@ public sealed class ProposalService : IProposalService
         _queries = queries;
         _rules = rules;
         _runbooks = runbooks;
+        _starts = starts;
         _catalog = catalog;
         _ui = ui;
         _unitOfWork = unitOfWork;
@@ -154,11 +157,31 @@ public sealed class ProposalService : IProposalService
                     cancellationToken);
                 break;
             case ProposalValidator.RunbookStart:
-                // Needs the run model (#82 step 3) and a decision on how a rule stores the start mode (#75 question 3).
-                throw new ProposalStateConflictException("Accepting a runbook_start proposal is not available yet; reject it or change the rule by hand.");
+                await ApplyRunbookStartAsync(body, userId, cancellationToken);
+                break;
         }
 
         // threshold and template have no automatic effect: a person applies them, then accepts.
+    }
+
+    private async Task ApplyRunbookStartAsync(JsonElement body, string userId, CancellationToken cancellationToken)
+    {
+        var ruleId = body.GetProperty("rule_id").GetString()!;
+        var runbookId = body.GetProperty("runbook_id").GetString()!;
+
+        try
+        {
+            // Tracked only: DecideAsync's save commits the row and the decision together.
+            await _starts.StageAsync(ruleId, runbookId, body.GetProperty("start").GetString()!, userId, cancellationToken);
+        }
+        catch (RuleNotFoundException)
+        {
+            throw new ProposalStateConflictException($"Rule '{ruleId}' no longer exists, so its start mode cannot be changed.");
+        }
+        catch (RunbookNotFoundException)
+        {
+            throw new ProposalStateConflictException($"Runbook '{runbookId}' no longer exists, so its start mode cannot be changed.");
+        }
     }
 
     private async Task ApplyRuleSeverityAsync(JsonElement body, CancellationToken cancellationToken)

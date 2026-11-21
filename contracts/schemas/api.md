@@ -104,7 +104,7 @@ How runs of one runbook on one rule start (migration `AddAutoRunStart`). No row 
 |---|---|---|
 | `rule_id`, `runbook_id` | text, primary key together | |
 | `start` | text, not null | `auto` or `approval` (check constraint) |
-| `set_by` | text, not null | Person who accepted the `runbook_start` proposal |
+| `set_by` | text, not null | Person who accepted the `runbook_start` proposal or called `PUT /runbook-starts/{rule_id}/{runbook_id}` |
 | `updated_at` | timestamptz, not null | |
 
 ### `action_runs`
