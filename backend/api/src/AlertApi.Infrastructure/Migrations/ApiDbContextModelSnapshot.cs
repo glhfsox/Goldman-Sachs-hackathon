@@ -512,6 +512,10 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("decided_by");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasColumnType("text")
+                        .HasColumnName("idempotency_key");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasColumnType("text")
@@ -524,6 +528,10 @@ namespace AlertApi.Infrastructure.Migrations
 
                     b.HasKey("Id")
                         .HasName("PK_proposals");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_proposals_idempotency_key");
 
                     b.HasIndex("AlertId", "Kind")
                         .HasDatabaseName("IX_proposals_alert_id_kind");

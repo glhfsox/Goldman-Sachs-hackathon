@@ -23,13 +23,16 @@ public class Proposal
 
     public string Status { get; private set; } = null!;
 
+    // Set by a client that retries (the ai-worker sends its job id); one key files one proposal.
+    public string? IdempotencyKey { get; private set; }
+
     public string? DecidedBy { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset? DecidedAt { get; private set; }
 
-    public static Proposal Create(string id, string alertId, string kind, string body, string author, DateTimeOffset createdAt)
+    public static Proposal Create(string id, string alertId, string kind, string body, string author, DateTimeOffset createdAt, string? idempotencyKey = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(alertId);
@@ -45,6 +48,7 @@ public class Proposal
             Body = body,
             Author = author,
             Status = Open,
+            IdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey,
             CreatedAt = createdAt
         };
     }

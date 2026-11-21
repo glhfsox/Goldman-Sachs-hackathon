@@ -17,7 +17,7 @@ public static class ProposalEndpoints
         app.MapPost("api/alerts/{id}/proposals", Create)
             .WithTags("Proposals")
             .WithName("CreateProposal")
-            .WithSummary("Files a proposal on an alert as the user in X-User (a person or ai-worker). An identical open proposal is returned with 200, not filed twice.");
+            .WithSummary("Files a proposal on an alert as the user in X-User (a person or ai-worker). A repeated Idempotency-Key, or an identical open proposal, returns the first one with 200 and files nothing.");
 
         var group = app.MapGroup("api/proposals").WithTags("Proposals");
 
@@ -44,10 +44,11 @@ public static class ProposalEndpoints
         string id,
         [FromBody] CreateProposalRequest request,
         [FromHeader(Name = "X-User")] string? user,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         IProposalService service,
         CancellationToken cancellationToken)
     {
-        var result = await service.CreateAsync(id, request, user, cancellationToken);
+        var result = await service.CreateAsync(id, request, user, idempotencyKey, cancellationToken);
 
         return result.Created
             ? TypedResults.Created($"/api/proposals/{result.Proposal.Id}", result.Proposal)

@@ -121,6 +121,7 @@ One row per step (node) of a run. The ai-worker reads the finished ones through 
 | `body` | jsonb, not null | The shape per kind is in [../api.md](../api.md) |
 | `author` | text, not null | A user id or `ai-worker` |
 | `status` | text, not null | `open`, `accepted`, `rejected`; indexed with `created_at` |
+| `idempotency_key` | text | The `Idempotency-Key` header of the request that filed it; unique (`UQ_proposals_idempotency_key`), null when none was sent |
 | `decided_by` | text | The person who accepted or rejected it |
 | `created_at` | timestamptz, not null | |
 | `decided_at` | timestamptz | |

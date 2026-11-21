@@ -20,6 +20,13 @@ public sealed class ProposalRepository : IProposalRepository
         return await _context.Proposals.FirstOrDefaultAsync(proposal => proposal.Id == id, cancellationToken);
     }
 
+    public async Task<Proposal?> GetByIdempotencyKeyAsync(string key, CancellationToken cancellationToken = default)
+    {
+        return await _context.Proposals
+            .AsNoTracking()
+            .FirstOrDefaultAsync(proposal => proposal.IdempotencyKey == key, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<Proposal>> GetAllAsync(string? status, int limit, CancellationToken cancellationToken = default)
     {
         var query = _context.Proposals.AsNoTracking();
