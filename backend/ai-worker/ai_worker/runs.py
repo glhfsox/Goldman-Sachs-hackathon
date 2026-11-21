@@ -231,7 +231,9 @@ def start(job_input: dict, ctx) -> dict:
     if s["runs"] < EVERY_RUNS:
         return {"proposed": None, "why": f"not enough recent runs: {s['runs']} in the last {MAX_RUN_AGE_DAYS} days, "
                                          f"{EVERY_RUNS} needed"}
-    current = "auto" if s["auto_started_share"] >= 0.5 else "approval"  # one manual re-run does not flip it
+    rows = ctx.api.get(f"/runbook-starts?rule={quote(rule_id, safe='')}&runbook={quote(runbook_id, safe='')}")
+    current = next((r["start"] for r in rows if type(r) is dict and r.get("runbook_id") == runbook_id), "approval") \
+        if type(rows) is list else "approval"  # no row: runs wait for a person
     state = {"rule": _cap({"id": rule_id, "name": rule.get("name"), "when": rule.get("when")}),
              "runbook_id": runbook_id, **_cap({"actions": latest["actions"]}), "starts_today": current, "history": s}
     a = _answers(ctx.ask_jev(state, _questions("start", START_QUESTION)), FACTORS, "start", ("auto", "approval"))
@@ -244,5 +246,5 @@ def start(job_input: dict, ctx) -> dict:
         "rule_id": rule_id, "team_id": latest["team_id"], "runbook_id": runbook_id, "start": d["choice"],
         "current_start": current, "confidence": d["confidence"],
         "probabilities": {k: d["probabilities"][k] for k in ("auto", "approval")}, "stats": s,
-        "reasons": (_stat_reasons(s) + _factor_reasons(a))[:6]})
+        "reasons": (_stat_reasons(s) + _factor_reasons(a))[:6]}, ctx.job_id)
     return {"proposal_id": p["id"], "proposed": d["choice"], "answer": answer}

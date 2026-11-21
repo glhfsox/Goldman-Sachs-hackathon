@@ -10,7 +10,8 @@ The loop is a LangGraph graph (`ai_worker/agent.py`: a model node that calls the
 checkpoint in the worker's own Postgres after every node (written before the next node starts), thread id = the job
 id. A job retried after an error, or re-run after the worker was killed, resumes from its last checkpoint: replies
 already received are not asked for again. On resume the tool calls the checkpoint already answered run again
-(validation only, and the mapping's idempotent `PUT`), so the handler knows what it saved. A job's checkpoints are
+(validation, and the save: the mapping's idempotent `PUT`, a proposal's `POST` with the same `Idempotency-Key`), so
+the handler knows what it saved; a `runbook` job finds its runbook no longer a draft and stops. A job's checkpoints are
 deleted in the same transaction that marks it `done` or `failed`. Every model call uses prompt caching (a breakpoint
 on the tools and system prompt, and an automatic one on the end of the conversation, 5 minutes): the second and
 later calls of a job, and a resumed job, read the prefix from the cache (measured: about 2,450 cached tokens on the
@@ -19,9 +20,16 @@ first call already, the minimum for Sonnet 5.5 is 512).
 | Record | Job id | Kind | What the job does |
 |---|---|---|---|
 | `schema.samples` (group `ai-worker`, from the earliest offset) | `schema:<fingerprint>` | `mapping` | Proposes a mapping for an unmapped schema: `PUT /mappings/{id}` |
-| `config.changes` kind `runbook`, `status: draft`, `canonical: null` (no group, read from the start at every start) | `runbook:<id>:<version>` | `runbook` | Converts the runbook source to the canonical form: `PUT /runbooks/{id}` |
+| `config.changes` kind `runbook`, `status: draft`, `canonical: null` (no group, read from the start at every start) | `runbook:<id>:<version>` | `runbook` | Converts the runbook source to the canonical form: `PUT /runbooks/{id}`. Skipped when the runbook is no longer that draft (already converted, e.g. by the seed) |
 | `alerts.changes` with `change: resolved` (group `ai-worker`, from the latest offset) | `proposal:<alert id>` | `proposal` | Drafts a runbook update from the alert's timeline: `POST /alerts/{id}/proposals` |
 | `alerts.changes`: a rule's first `opened`, and a `resolved` once per 20 resolved alerts of the rule | `severity:<rule id>:first`, `severity:<rule id>:<n>` | `severity` | Proposes the rule's severity (TypeSafe Jev, not Claude): `POST /alerts/{id}/proposals`, kind `rule_severity` |
+
+The `runbook` and `proposal` tools read the registered actions and action targets from the api (`GET /actions`,
+`GET /action-targets`) for every job and tell the model about them, so a step names a real target
+(`{"target": "pricing-engine", "instance": "{{instance}}"}`) instead of a made-up host. The tool saves through the api
+inside the loop: when the api refuses the runbook (`422`, e.g. a step that resolves to no target), its `details` go back
+to the model as problems to fix. Proposals are filed with `Idempotency-Key` = the job id, so a retried job gets the
+first proposal back instead of filing a second one.
 
 `config.changes` also feeds in-memory copies of the current mappings, which the mapping tool checks a new mapping
 against, and of the rules, which the severity judge reads.
@@ -69,13 +77,15 @@ jq -s 'length as $n | {attempts: $n, retry_rate: ((map(select(.outcome=="retry")
 ```
 
 Status: all three tools are built (`ai_worker/mapping.py`, `ai_worker/runbooks.py`) and were run end to end
-against the real Claude API; the api they save to is still the stub.
+against the real Claude API and, together with the three Jev judges, against the real api (root
+`docker-compose.yml`, checked 21-11).
 
 ## Run
 
 ```bash
 bash check.sh                                   # tests (Postgres from TEST_DATABASE_URL or a temporary initdb)
-docker compose up -d --build                    # ai-worker + stub api + its Postgres + the processor stack and Kafka
+(cd ../.. && docker compose up -d --build)      # the whole system: the ai-worker on the real api
+docker compose up -d --build                    # alone: ai-worker + stub api + its Postgres + the processor stack and Kafka
 ANTHROPIC_API_KEY=sk-... docker compose up -d ai-worker
 TYPESAFE_API_KEY=... docker compose up -d ai-worker   # the Jev judges; then scripts/judge_demo.py or scripts/runs_demo.py
 docker compose logs -f ai-worker stub-api
@@ -135,7 +145,7 @@ careful; more automation is only ever a proposal a person accepts.
   time a (rule, runbook) pair's runs reach a multiple of 10 it judges from the pair's most recent ones: at most 50,
   finished in the last 30 days (`MAX_RUNS`, `MAX_RUN_AGE_DAYS`); fewer than 10 inside that window files nothing. A
   `runbook_start` proposal (`auto` or `approval`) is filed only when Jev's choice differs from how the pair's runs
-  start today (`auto` when at least half of the window's runs started by themselves), with confidence of at least
+  start today (`GET /runbook-starts`; `approval` when the pair has no row), with confidence of at least
   0.6. A run dated more than 5 minutes in the future is skipped.
 - An api without `/runs` (404), an api that is down or returns junk: logged once per outage; the pending poll retries
   every 5 s (every 30 s after a 404), the finished poll every 30 s; Kafka consumption goes on.
@@ -148,7 +158,7 @@ today, and the stats (shares of runs started by themselves, approved, cancelled 
 risk check, failed; median seconds from the alert to the approval; how many of the rule's alerts got no run; the
 window). No user ids.
 
-`scripts/runs_demo.py` schedules three `auto` runs in the stub api (a staging retry, a 25,000,000 EUR prod settlement
+`scripts/runs_demo.py` (stub api only) schedules three `auto` runs in the stub api (a staging retry, a 25,000,000 EUR prod settlement
 retry, and one whose window is already over), prints each verdict, then opens 10 alerts on `alerts.changes`, adds a finished run for each
 and prints the `runbook_start` proposal.
 
@@ -170,9 +180,9 @@ were written by the same hand that tuned the wording, so expect less on new case
   request, publishes the mappings and runbooks it saves to `config.changes`, and returns `scripts/alert_fixture.json`
   for any `GET /alerts/{id}` it was not given. It also plays the run side of issue #75: `GET /runs`, risk checks,
   approve (403 for a service actor), and a scheduled run with no verdict going to `waiting_approval` at `start_at`;
-  `POST /api/stub/runs` and `POST /api/stub/finished-runs` add runs for demos. The real api (`backend/api`) now
-  serves everything else the worker calls, proposals included; only the `/runs` endpoints are still stub-only, and
-  against the real api the run judges just wait (a `404` on `/runs` is logged once).
+  `POST /api/stub/runs` and `POST /api/stub/finished-runs` add runs for demos. It runs only with this folder's
+  compose file; the whole system (root `docker-compose.yml`) uses the real api, which serves everything the worker
+  calls, `/runs` included.
 
 ## What is sent to Claude
 
@@ -195,12 +205,12 @@ checkpoint tables of the worker's own database until the job ends; LangSmith tra
 - A worker killed mid-job re-runs that job on its next start without counting an attempt and writes no metrics
   line for the killed attempt; a Claude job resumes from its checkpoint, and only the model call that was in flight
   is paid again (mostly at the cache-read price). A `proposal`, `severity` or
-  `run_start` job that died between the `POST` and the commit files a second proposal.
+  `run_start` job that died between the `POST` and the commit sends the same `Idempotency-Key` again, so the api
+  returns the first proposal.
 - One worker runs one job at a time: a long Claude job can delay a `run_risk` job past its run's `start_at`, and the
   run then waits for a person (safe, but less automation).
 - A `mapping` job that fails is not retried: the processor publishes one sample per schema, so a person writes that
   mapping.
-- The stub api stands in for the real one.
 
 ## Future improvements
 

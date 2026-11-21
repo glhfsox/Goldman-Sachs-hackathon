@@ -23,7 +23,9 @@ def main() -> None:
     for c in cases:
         latest = {"alert_id": "A1", "team_id": "t", "trigger": "manual", "actions": c["actions"]}
         ctx = SimpleNamespace(rules={"r": c["rule"]}, ask_jev=judge.ask_jev, run_stats=lambda *_, c=c, la=latest: (c["stats"], la),
-                              api=SimpleNamespace(post=lambda *_: {"id": "prop"}))
+                              job_id="eval",
+                              api=SimpleNamespace(post=lambda *_: {"id": "prop"}, get=lambda _, s=c["stats"]: [
+                                  {"runbook_id": "rb", "start": "auto"}] if s["auto_started_share"] >= 0.5 else []))
         out = runs.start({"rule_id": "r", "runbook_id": "rb"}, ctx)
         a, got = out["answer"], out["proposed"]
         right += got == c["expected"]
