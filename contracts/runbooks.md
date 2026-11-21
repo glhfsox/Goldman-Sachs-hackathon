@@ -80,8 +80,14 @@ a call is the title and first step as text-to-speech.
    alert has no value for is `blocked`. The run's risk is the highest risk of any step; a person starting it by hand is the approval.
 3. The planner moves the steps: a step is `ready` when everything it needs has ended, `skipped` when its `if` is false or
    a step it needs was skipped, `blocked` when a step it needs failed. A text-only step waits for a person's tick.
-4. The executor (step 3c of #82) runs ready steps and records each result. A failed run leaves the alert open for a
-   person; nothing in the loop waits for a click. A run can be cancelled at any time.
+4. The executor, inside every api replica, claims a `ready` step of a `running` run (one claim per step across replicas,
+   `FOR UPDATE SKIP LOCKED`), counts the attempt, calls the action plugin with the frozen request and the step's
+   `Idempotency-Key`, and records the result `{ok, output?, error?}`. In the same transaction the planner moves the steps behind
+   it (a failed step with attempts left becomes `ready` again after a backoff of 2 s times the attempts made) and the run
+   ends `done` or `failed`. Every attempt is one `action_finished` row on the timeline. A claim lasts `RUNBOOK_LEASE_S`; a
+   step whose worker died is taken over after that and recorded as `failed`, so it follows the same retry rules. A plugin that
+   throws is a failed step. A failed run leaves the alert open for a person; nothing in the loop waits for a click. A run can be
+   cancelled at any time: a step already running finishes and keeps its result, nothing moves on.
 
 ## 3. Extension points: one file plus one config entry each
 

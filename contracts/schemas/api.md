@@ -33,8 +33,8 @@ Every insert, update or soft-delete below is published to Kafka `config.changes`
 | `alert_id` | text, not null | Indexed with `at` |
 | `at` | timestamptz, not null | |
 | `actor` | text, not null | A user id, a service name, or `auto` |
-| `kind` | text, not null | `opened`, `severity_raised`, `reopened`, `acked`, `resolved`, `notification_sent`, `notification_failed`, `notification_suppressed`, `action_requested`, `action_approved`, `action_rejected`, `action_finished`, `proposal_created`, `proposal_decided` |
-| `data` | jsonb, not null | For the `action_*` kinds: `{"action_run": {id, runbook_id, step_index, action, params, status, result}}` |
+| `kind` | text, not null | `opened`, `severity_raised`, `reopened`, `acked`, `resolved`, `notification_sent`, `notification_failed`, `notification_suppressed`, `action_requested`, `action_approved`, `action_rejected`, `action_finished`, `run_started`, `node_succeeded`, `run_done`, `run_failed`, `run_cancelled`, `proposal_created`, `proposal_decided` |
+| `data` | jsonb, not null | For the `action_*` kinds: `{"action_run": {id, runbook_id, step_index, action, params, status, result}}`. The executor's `action_finished` row (actor `runbook-executor`, id `node-finished:<run>:<node>:<attempt>`) adds `run_id`, `node_id`, `attempt` beside `action_run`, where `status` is `succeeded` or `failed` and `result` is `{ok, output, error}`; the run's own end is `run_done` / `run_failed` |
 
 For rows that come from `alerts.changes`, `data` is `{"severity": ..., "count": ...}` of the alert at that change. `count_threshold` changes update the `alerts` copy only and add no row. A record whose id is already a row is skipped.
 
@@ -48,6 +48,15 @@ Example row:
 {"id": "01JD3KA...", "alert_id": "01JD3K8...", "at": "2026-11-20T10:15:03.412Z", "actor": "notifier",
  "kind": "notification_sent", "data": {"notification": {"id": "9f2c...", "channel": "sms", "user_id": "marek",
  "status": "sent"}, "why": "rule settlements-workflow-failed, on-call"}}
+```
+
+An `action_finished` row written by the executor (one per attempt of a step):
+
+```json
+{"id": "node-finished:run-7f3a:retry:1", "alert_id": "01JD3K8...", "at": "2026-11-21T10:15:04.101Z", "actor": "runbook-executor",
+ "kind": "action_finished", "data": {"action_run": {"id": "run-7f3a:retry", "runbook_id": "settlement-timeout", "step_index": 1,
+ "action": "retry_workflow", "params": {"workflowId": "WF-17"}, "status": "succeeded", "result": {"ok": true, "output": "{}", "error": null}},
+ "run_id": "run-7f3a", "node_id": "retry", "attempt": 1}}
 ```
 
 ### `action_targets`: where runbook actions go
@@ -106,7 +115,7 @@ One row per step (node) of a run. The ai-worker reads the finished ones through 
 | `retries`, `timeout_s` | int | |
 | `status` | text, not null | `pending`, `ready`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `cancelled` |
 | `attempt` | int, not null | Calls made so far; a step may run again while `attempt < 1 + retries` |
-| `not_before`, `lease_until` | timestamptz | When a ready step may be claimed; when a running claim expires (executor, step 3c) |
+| `not_before`, `lease_until` | timestamptz | When a ready step may be claimed; when a running claim expires. The executor sets `lease_until` when it claims a step and clears it with the result; a save that finds it changed (the step was taken over) is dropped |
 | `idempotency_key` | text, not null, unique | `<run_id>:<node_id>`; sent with every call |
 | `result` | jsonb | Cut to 4 KB |
 | `started_at`, `finished_at` | timestamptz | |

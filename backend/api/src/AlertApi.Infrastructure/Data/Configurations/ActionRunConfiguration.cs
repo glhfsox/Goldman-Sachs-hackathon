@@ -32,7 +32,8 @@ public sealed class ActionRunConfiguration : IEntityTypeConfiguration<ActionRun>
         builder.Property(node => node.Status).HasColumnName("status").IsRequired();
         builder.Property(node => node.Attempt).HasColumnName("attempt");
         builder.Property(node => node.NotBefore).HasColumnName("not_before");
-        builder.Property(node => node.LeaseUntil).HasColumnName("lease_until");
+        // A worker whose lease ran out and was taken over by another loses the save instead of overwriting its result.
+        builder.Property(node => node.LeaseUntil).HasColumnName("lease_until").IsConcurrencyToken();
         builder.Property(node => node.IdempotencyKey).HasColumnName("idempotency_key").IsRequired();
         builder.Property(node => node.Result).HasColumnName("result").HasColumnType("jsonb");
         builder.Property(node => node.StartedAt).HasColumnName("started_at");
@@ -42,7 +43,7 @@ public sealed class ActionRunConfiguration : IEntityTypeConfiguration<ActionRun>
         builder.HasIndex(node => node.IdempotencyKey).IsUnique().HasDatabaseName("UQ_action_runs_idempotency_key");
         builder.HasIndex(node => node.AlertId).HasDatabaseName("IX_action_runs_alert_id");
 
-        // The executor (step 3c) claims ready nodes and nodes whose lease ran out.
+        // The executor claims ready nodes and nodes whose lease ran out.
         builder.HasIndex(node => node.NotBefore)
             .HasFilter("status in ('ready', 'running')")
             .HasDatabaseName("IX_action_runs_claimable");

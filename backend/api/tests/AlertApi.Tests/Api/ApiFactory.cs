@@ -20,7 +20,8 @@ public static class ApiFactory
         PostgresFixture postgres,
         string environment,
         bool enableSwagger,
-        string? redisUrl = null)
+        string? redisUrl = null,
+        bool runExecutor = false)
     {
         var database = $"api_{Guid.NewGuid():N}";
         var builder = new Npgsql.NpgsqlConnectionStringBuilder(postgres.ConnectionString);
@@ -40,6 +41,9 @@ public static class ApiFactory
             // The producer connects lazily; queued outbox rows stay in the table and the publisher logs and retries.
             host.UseSetting("KAFKA_BROKERS", "localhost:1");
             host.UseSetting("REDIS_URL", redisUrl ?? "redis://localhost:1/0");
+            // Tests that look at a run's first state must not race a worker; the executor tests switch it on.
+            host.UseSetting("RUNBOOK_EXECUTOR", runExecutor ? "true" : "false");
+            host.UseSetting("RUNBOOK_POLL_MS", "50");
             host.UseSetting("ENABLE_SWAGGER", enableSwagger ? "true" : "false");
             // Tests feed records to the handler directly; no consumer should poll a broker that does not exist.
             host.ConfigureServices(services =>

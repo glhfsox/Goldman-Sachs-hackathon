@@ -4,6 +4,7 @@ using AlertApi.Api.Endpoints;
 using AlertApi.Api.Infrastructure;
 using AlertApi.Application.Actions;
 using AlertApi.Application.Interfaces;
+using AlertApi.Application.Runs;
 using AlertApi.Application.Serialization;
 using AlertApi.Application.Services;
 using AlertApi.Domain.Repositories;
@@ -13,6 +14,7 @@ using AlertApi.Infrastructure.Kafka;
 using AlertApi.Infrastructure.Outbox;
 using AlertApi.Infrastructure.Realtime;
 using AlertApi.Infrastructure.Redis;
+using AlertApi.Infrastructure.Runs;
 using AlertApi.Infrastructure.Queries;
 using AlertApi.Infrastructure.Repositories;
 
@@ -70,6 +72,20 @@ builder.Services.AddSingleton<IActionPlugin, EscalateAction>();
 builder.Services.AddSingleton<IActionRegistry, ActionRegistry>();
 builder.Services.AddScoped<IRunRepository, RunRepository>();
 builder.Services.AddScoped<IRunService, RunService>();
+builder.Services.AddSingleton(new RunExecutorOptions
+{
+    Enabled = builder.Configuration.GetValue("RUNBOOK_EXECUTION_ENABLED", true),
+    PollInterval = TimeSpan.FromMilliseconds(builder.Configuration.GetValue("RUNBOOK_POLL_MS", 1000)),
+    Lease = TimeSpan.FromSeconds(builder.Configuration.GetValue("RUNBOOK_LEASE_S", 120)),
+    Concurrency = builder.Configuration.GetValue("RUNBOOK_CONCURRENCY", 4)
+});
+builder.Services.AddScoped<IRunExecutor, RunExecutor>();
+
+// A separate container can run the executor alone: switch it off in the api replicas with RUNBOOK_EXECUTOR=false.
+if (builder.Configuration.GetValue("RUNBOOK_EXECUTOR", true))
+{
+    builder.Services.AddHostedService<RunExecutorWorker>();
+}
 builder.Services.AddScoped<IProposalRepository, ProposalRepository>();
 builder.Services.AddScoped<IProposalService, ProposalService>();
 builder.Services.AddSingleton(new RedisOptions { Url = redisUrl });
