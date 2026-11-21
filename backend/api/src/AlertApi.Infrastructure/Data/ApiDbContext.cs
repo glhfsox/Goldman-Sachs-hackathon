@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
+using Npgsql;
+
 using AlertApi.Application.Exceptions;
 using AlertApi.Application.Interfaces;
 using AlertApi.Domain.Models;
@@ -41,6 +43,10 @@ public class ApiDbContext : DbContext, IUnitOfWork
 
     public DbSet<ActionTarget> ActionTargets => Set<ActionTarget>();
 
+    public DbSet<RunbookRun> Runs => Set<RunbookRun>();
+
+    public DbSet<ActionRun> ActionRuns => Set<ActionRun>();
+
     public DbSet<Proposal> Proposals => Set<Proposal>();
 
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
@@ -55,6 +61,10 @@ public class ApiDbContext : DbContext, IUnitOfWork
         catch (DbUpdateConcurrencyException exception)
         {
             throw new ConcurrentUpdateException(exception);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { ConstraintName: RunConstraints.LiveRunPerAlert })
+        {
+            throw new LiveRunExistsException(exception);
         }
     }
 

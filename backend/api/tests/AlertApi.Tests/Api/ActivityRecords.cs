@@ -12,7 +12,8 @@ public static class ActivityRecords
         string severity = "critical",
         long count = 1,
         string firstSeen = "2026-11-20T10:15:01.000Z",
-        string? ackedBy = null)
+        string? ackedBy = null,
+        string sampleEvent = """{"type": "WORKFLOW_FAILED", "mapped": true}""")
     {
         var acked = ackedBy is null ? "null" : $"\"{ackedBy}\"";
 
@@ -25,7 +26,7 @@ public static class ActivityRecords
                        "first_seen": "{{{firstSeen}}}", "last_seen": "2026-11-20T10:15:01.000Z",
                        "first_received_at": "2026-11-20T10:15:02.123Z", "runbook_id": "settlement-timeout",
                        "acked_by": {{{acked}}}, "resolved_by": null,
-                       "sample_event": {"type": "WORKFLOW_FAILED", "mapped": true} }}
+                       "sample_event": {{{sampleEvent}}} }}
             """;
     }
 
