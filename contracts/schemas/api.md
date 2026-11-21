@@ -21,6 +21,7 @@ Every insert, update or soft-delete below is published to Kafka `config.changes`
 | `runbooks` | `id` text primary key, `team_id` text, `title` text, `format` text, `source` text, `canonical` jsonb ([../runbooks.md](../runbooks.md)), `status` text (`draft` \| `active`), `version` int, `updated_at` timestamptz | `runbook` |
 
 `teams`, `users`, `memberships` and `service_deps` are seeded; the seed is published like any change.
+`sources` is seeded with the four sources of [../data/sources.md](../data/sources.md) §1 by the `AddSources` migration, which also queues their `config.changes` records in `outbox`.
 
 ## Owned tables: activity
 

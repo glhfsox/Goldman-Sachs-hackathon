@@ -3,7 +3,7 @@
 Base URL `http://localhost:8000/api`. JSON in and out. No auth in the PoC: every request carries
 `X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log. A service
 calling the api sends its own name there: the ai-worker sends `X-User: ai-worker`.
-Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status.
+Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status; the api sends them as `application/problem+json`, so `title`, `status` and `detail` are there too. Codes: `not_found` (404), `conflict` (409), `invalid_<thing>` (422).
 
 ## Alert object
 
@@ -44,11 +44,13 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `POST /alerts/{id}/ack` | | `Alert` |
 | `POST /alerts/{id}/resolve` | | `Alert` |
 | `GET /rules?team=` | | `[Rule]` ([rules.md](rules.md)) |
-| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule` |
-| `GET /mappings`, `PUT /mappings/{id}[?fingerprint=<fingerprint>]` | `Mapping` | `Mapping`, or `422 invalid_mapping`. With `fingerprint`, that schema sample becomes `mapped` |
+| `GET /rules/{id}` | | `Rule` |
+| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule`. `409 conflict` for a taken id on `POST`; on `PUT` the body `id` must equal the URL id |
+| `GET /mappings`, `PUT /mappings/{id}[?fingerprint=<fingerprint>]` | `Mapping` | `Mapping`, or `422 invalid_mapping`. `PUT` creates or replaces; `GET` lists highest `priority` first. With `fingerprint`, that schema sample becomes `mapped` |
 | `GET /schema-samples?status=` | | unmapped schemas waiting for a mapping |
 | `PUT /schema-samples/{fingerprint}` | `{status: "failed", error}` | the sample; the ai-worker calls it when it could not produce a valid mapping, so a person writes one in the UI |
-| `GET /sources`, `POST /sources` | `{id, kind, config}` | `Source` |
+| `GET /sources`, `GET /sources/{id}`, `POST /sources` | `{id, kind, config}` | `Source`. `id`: lowercase letters, digits, `-`; a `kafka` source needs `config.topic`; `422 invalid_source` otherwise, `409 conflict` for a taken id |
+| `PUT /sources/{id}` | `{kind, config, enabled}` | `Source` (also how a source is disabled) |
 | `GET /teams`, `GET /users` | | lists for pickers; a team includes `members` and who is on call |
 | `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` | `Preferences` |
 | `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` until the ai-worker has converted it, [runbooks.md](runbooks.md)) |
@@ -80,6 +82,8 @@ people ran actions on it; accepting it saves that runbook as `active`. Example:
   "steps": [{"text": "Check counterparty-service health", "action": "http_get",
              "params": {"url": "http://counterparty-service/health"}, "approval": "none"}]}}}
 ```
+
+The api accepts exactly what the processor reads: unknown fields, wrong types and unknown ops are `422`, and `details` has one entry per wrong path.
 
 Example invalid rule:
 

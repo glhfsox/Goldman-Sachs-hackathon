@@ -12,6 +12,12 @@ public class ApiDbContext : DbContext, IUnitOfWork
     {
     }
 
+    public DbSet<Source> Sources => Set<Source>();
+
+    public DbSet<Rule> Rules => Set<Rule>();
+
+    public DbSet<Mapping> Mappings => Set<Mapping>();
+
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

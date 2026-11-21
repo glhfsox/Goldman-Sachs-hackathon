@@ -22,6 +22,46 @@ namespace AlertApi.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("AlertApi.Domain.Models.Mapping", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("body");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("origin");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer")
+                        .HasColumnName("priority");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("PK_mappings");
+
+                    b.ToTable("mappings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_mappings_origin", "origin IN ('seed', 'human', 'llm')");
+
+                            t.HasCheckConstraint("CK_mappings_status", "status IN ('active', 'disabled')");
+                        });
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.OutboxMessage", b =>
                 {
                     b.Property<long>("Id")
@@ -54,6 +94,72 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasName("PK_outbox");
 
                     b.ToTable("outbox", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.Rule", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("body");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("TeamId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("team_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("PK_rules");
+
+                    b.HasIndex("TeamId")
+                        .HasDatabaseName("IX_rules_team_id");
+
+                    b.ToTable("rules", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.Source", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Config")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("config");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("PK_sources");
+
+                    b.ToTable("sources", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_sources_kind", "kind IN ('http', 'kafka')");
+                        });
                 });
 #pragma warning restore 612, 618
         }

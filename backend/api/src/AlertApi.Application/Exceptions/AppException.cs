@@ -15,4 +15,9 @@ public abstract class AppException : Exception
     public string Title { get; }
 
     public string Details { get; }
+
+    // The "error" field of contracts/api.md; the UI switches on it, so it stays stable.
+    public virtual string Code => Title.ToLowerInvariant().Replace(' ', '_');
+
+    public virtual IReadOnlyList<ProblemItem> Problems => [];
 }
