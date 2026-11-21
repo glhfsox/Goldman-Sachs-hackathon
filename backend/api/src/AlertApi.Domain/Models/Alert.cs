@@ -5,6 +5,10 @@ namespace AlertApi.Domain.Models;
 // Read copy of the processor's alert (contracts/schemas/api.md). Only alerts.changes records change it.
 public class Alert
 {
+    public const string Open = "open";
+    public const string Acked = "acked";
+    public const string Resolved = "resolved";
+
     private Alert()
     {
     }
@@ -54,6 +58,13 @@ public class Alert
         alert.ReplaceWith(snapshot);
 
         return alert;
+    }
+
+    public AlertSnapshot ToSnapshot()
+    {
+        return new AlertSnapshot(
+            Id, RuleId, TeamId, IncidentId, Status, Severity, Title, Body, Fields, Color, Count,
+            FirstSeen, LastSeen, FirstReceivedAt, RunbookId, AckedBy, ResolvedBy, SampleEvent);
     }
 
     // Every change record carries the whole alert, so applying one is a replace: applying it twice changes nothing.

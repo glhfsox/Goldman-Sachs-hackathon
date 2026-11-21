@@ -27,6 +27,7 @@ builder.Services.AddDbContext<ApiDbContext>(options =>
 builder.Services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<ApiDbContext>());
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IConfigChangeOutbox, ConfigChangeOutbox>();
+builder.Services.AddScoped<IAlertChangeOutbox, AlertChangeOutbox>();
 builder.Services.AddScoped<ISourceRepository, SourceRepository>();
 builder.Services.AddScoped<ISourceService, SourceService>();
 builder.Services.AddScoped<IRuleRepository, RuleRepository>();

@@ -22,6 +22,14 @@ public static class AlertEndpoints
             .WithName("GetAlertById")
             .WithSummary("Returns one alert with its timeline and notifications; incident and runbook are null until those features exist.");
 
+        group.MapPost("{id}/ack", Ack)
+            .WithName("AckAlert")
+            .WithSummary("Acks an open alert as the user in X-User; 409 when it is not open. The copy changes when the record returns from Kafka.");
+
+        group.MapPost("{id}/resolve", Resolve)
+            .WithName("ResolveAlert")
+            .WithSummary("Resolves an alert as the user in X-User; 409 when it is already resolved.");
+
         return app;
     }
 
@@ -43,6 +51,28 @@ public static class AlertEndpoints
         CancellationToken cancellationToken)
     {
         var alert = await service.GetByIdAsync(id, cancellationToken);
+
+        return TypedResults.Ok(alert);
+    }
+
+    private static async Task<Ok<AlertResponse>> Ack(
+        string id,
+        [FromHeader(Name = "X-User")] string? user,
+        IAlertService service,
+        CancellationToken cancellationToken)
+    {
+        var alert = await service.AckAsync(id, user, cancellationToken);
+
+        return TypedResults.Ok(alert);
+    }
+
+    private static async Task<Ok<AlertResponse>> Resolve(
+        string id,
+        [FromHeader(Name = "X-User")] string? user,
+        IAlertService service,
+        CancellationToken cancellationToken)
+    {
+        var alert = await service.ResolveAsync(id, user, cancellationToken);
 
         return TypedResults.Ok(alert);
     }
