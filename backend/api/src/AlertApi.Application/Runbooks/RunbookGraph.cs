@@ -13,6 +13,7 @@ public sealed record RunbookNode(
     string? Action,
     JsonElement? Params,
     IReadOnlyList<string> Needs,
+    bool NeedsDeclared,
     NodeCondition? If,
     int Retries,
     int? TimeoutSeconds);
@@ -45,7 +46,8 @@ public static class RunbookGraph
         foreach (var step in steps.EnumerateArray())
         {
             var id = StringOf(step, "id") ?? DefaultId(index);
-            var needs = step.TryGetProperty("needs", out var needsElement) && needsElement.ValueKind == JsonValueKind.Array
+            var declared = step.TryGetProperty("needs", out var needsElement) && needsElement.ValueKind == JsonValueKind.Array;
+            var needs = declared
                 ? needsElement.EnumerateArray().Where(need => need.ValueKind == JsonValueKind.String).Select(need => need.GetString()!).ToList()
                 : previous is null ? [] : [previous];
 
@@ -56,6 +58,7 @@ public static class RunbookGraph
                 StringOf(step, "action"),
                 step.TryGetProperty("params", out var parameters) && parameters.ValueKind == JsonValueKind.Object ? parameters.Clone() : null,
                 needs,
+                declared,
                 ConditionOf(step),
                 IntOf(step, "retries") ?? 0,
                 IntOf(step, "timeout_s")));
@@ -65,6 +68,43 @@ public static class RunbookGraph
         }
 
         return nodes;
+    }
+
+    // What each node really waits for. A step that only has text is done by a person, and a step that waits for it by
+    // default (no `needs` written) must not stall the run: it waits for what that text step waited for. A `needs`
+    // that names a text step is kept, so the author can still make a step wait for a person (runbook spec §3).
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> EffectiveNeeds(IReadOnlyList<RunbookNode> nodes)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+
+        var byId = nodes.GroupBy(node => node.Id).ToDictionary(group => group.Key, group => group.First());
+        var result = new Dictionary<string, IReadOnlyList<string>>();
+
+        foreach (var node in nodes)
+        {
+            result[node.Id] = node.NeedsDeclared ? node.Needs : Through(node.Needs, byId, []);
+        }
+
+        return result;
+    }
+
+    private static List<string> Through(IReadOnlyList<string> needs, Dictionary<string, RunbookNode> byId, HashSet<string> seen)
+    {
+        var result = new List<string>();
+
+        foreach (var need in needs)
+        {
+            if (byId.TryGetValue(need, out var target) && target.Action is null && seen.Add(need))
+            {
+                result.AddRange(target.NeedsDeclared ? target.Needs : Through(target.Needs, byId, seen));
+            }
+            else
+            {
+                result.Add(need);
+            }
+        }
+
+        return result.Distinct().ToList();
     }
 
     // Kahn's algorithm: true when every node can be ordered after the nodes it needs.

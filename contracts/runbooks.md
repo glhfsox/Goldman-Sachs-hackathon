@@ -41,6 +41,12 @@ converted once to this form in `runbooks.canonical`. Only `active` runbooks are 
   `needs`: ids of the steps it waits for; without `needs` a step waits for the step before it, so a list of
   steps runs in order. The needs must not form a cycle.
 - `if: {step, status}`: run only when that step (one of `needs`) ended `succeeded` or `failed`.
+- A step without `action` is a text step: a person ticks it, and it never starts by itself. A step that waits for it only
+  by default (no `needs` written) waits for what the text step waited for, so a note in the middle of a list does not stall
+  the run; a `needs` that names a text step is kept and waits for the tick.
+- A `{{path}}` in a step's `params` that the alert has no value for makes that step `blocked`: it never runs with an
+  empty value. Values are filled once and literally (a value containing `{{...}}` is not expanded again).
+- Risk of a run = the highest risk of any step with an action, including steps an `if` may skip.
 - `retries`: a whole number 0 to 3; `timeout_s`: 1 to 300.
 - `matches` uses the condition language and paths of [rules.md](rules.md). Placeholders are `{{path}}`.
   `matches` may be left out when the source does not say what the runbook applies to; such a runbook
