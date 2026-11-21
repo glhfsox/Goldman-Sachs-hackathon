@@ -33,7 +33,7 @@ def finish(conn, job: dict, result: dict | None = None, error: str | None = None
     attempts = job["attempts"] + 1
     status = "done" if error is None else "pending" if retry and attempts < MAX_ATTEMPTS else "failed"
     conn.execute("UPDATE jobs SET status = %s, attempts = %s, result = %s, error = %s,"
-                 " finished_at = CASE WHEN %s = 'pending' THEN NULL ELSE now() END WHERE id = %s",
+                 " finished_at = CASE WHEN %s = 'pending' THEN NULL ELSE clock_timestamp() END WHERE id = %s",
                  (status, attempts, None if result is None else Jsonb(result), error, status, job["id"]))
     conn.commit()
 

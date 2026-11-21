@@ -4,6 +4,7 @@ on a resolved alert). contracts/runbooks.md §1; the condition language and path
 import json
 import re
 from typing import Any
+from urllib.parse import quote
 
 from anthropic import beta_tool
 from processor.core import MISSING, compile_condition, compile_path, resolve
@@ -26,6 +27,7 @@ PATHS_TEXT = """A `{{path}}` placeholder is filled from the alert's event when t
 `type`, `service`, `env`, `severity`, `source` and `ts` are fields of the event envelope, and any other path is read \
 from the raw payload the source sent, so `{{workflowId}}` or `{{error.code}}` read the payload's fields."""
 STEP_KEYS = {"text", "action", "params", "approval", "when", "link"}
+RAW_CAP, RESULT_CAP = 4000, 500  # characters of the alert's raw event and of each action run's result sent to Claude
 
 CONVERT_SYSTEM = f"""You convert a team's runbook into the canonical JSON form our alerting service uses: it shows \
 the steps on every alert the runbook belongs to and offers one-click buttons for the steps that are actions. Call the \
@@ -152,6 +154,12 @@ def _norm(s: str) -> str:
     return " ".join(s.split()).casefold()
 
 
+def _capped(v, limit: int) -> str:
+    """`v` as compact JSON text, cut to `limit` characters with a visible marker."""
+    s = json.dumps(v, ensure_ascii=False)
+    return s if len(s) <= limit else f"{s[:limit]}… [truncated: {limit} of {len(s)} characters shown]"
+
+
 def _rejected(problems: list[str]) -> str:
     return "Not accepted. Fix every problem and call the tool again:\n- " + "\n- ".join(problems)
 
@@ -176,9 +184,9 @@ def convert(job_input: dict, ctx) -> dict:
             canonical = {"id": rid, "title": title, "steps": steps} | ({} if matches is None else {"matches": matches})
             if problems := check_runbook(canonical):
                 return _rejected(problems)
-            # shortcut: a substring check, not proof the quote belongs to this step; drop it if a person must confirm approvals
+            # shortcut: the quote must occur in the source and mention approval, not proof it belongs to this step; drop it if a person must confirm approvals
             for s, q in zip(steps, quotes):
-                _set_approval(s, keep_none=type(q) is str and _norm(q) != "" and _norm(q) in _norm(source))
+                _set_approval(s, keep_none=type(q) is str and "approv" in _norm(q) and _norm(q) in _norm(source))
             saved["canonical"] = canonical
             return f"Accepted: {len(steps)} steps. You are done."
 
@@ -187,14 +195,14 @@ def convert(job_input: dict, ctx) -> dict:
         if "canonical" not in saved:
             raise JobFailed("the model submitted no valid runbook; it stays draft")
         canonical = saved["canonical"]
-    ctx.api.put(f"/runbooks/{rid}", {"canonical": canonical, "status": "active"})
+    ctx.api.put(f"/runbooks/{quote(rid, safe='')}", {"canonical": canonical, "status": "active"})
     return {"runbook_id": rid, "steps": len(canonical["steps"])}
 
 
 def propose(job_input: dict, ctx) -> dict:
     alert_id = job_input["alert_id"]
     try:
-        doc = ctx.api.get(f"/alerts/{alert_id}")
+        doc = ctx.api.get(f"/alerts/{quote(alert_id, safe='')}")
     except ApiError as e:
         if e.status == 404:
             raise JobFailed(f"alert {alert_id} not found") from e
@@ -237,16 +245,18 @@ def propose(job_input: dict, ctx) -> dict:
                        {"field": "env", "op": "eq", "value": ev.get("env")}]}
     facts = {"alert": {"title": alert.get("title"), "type": ev["type"], "env": ev.get("env"),
                        "service": ev.get("service")},
-             "sample_event": ev,
+             "sample_event": ev | ({"raw": _capped(ev["raw"], RAW_CAP)} if "raw" in ev else {}),
              "timeline": [{k: e.get(k) for k in ("at", "actor", "kind")}
-                          | ({"action_run": e["data"]["action_run"]} if e.get("kind", "").startswith("action_") else {})
+                          | ({"action_run": (r := e["data"]["action_run"])
+                              | ({"result": _capped(r["result"], RESULT_CAP)} if "result" in r else {})}
+                             if e.get("kind", "").startswith("action_") else {})
                           for e in timeline]}
     ctx.run_agent(PROPOSE_SYSTEM, "The resolved alert, the event that raised it, and its timeline in order:\n\n"
                   + json.dumps(facts, indent=1, ensure_ascii=False), propose_runbook)
     if "canonical" not in saved:
         raise JobFailed("the model submitted no valid runbook proposal")
     canonical = saved["canonical"]
-    p = ctx.api.post(f"/alerts/{alert_id}/proposals",
+    p = ctx.api.post(f"/alerts/{quote(alert_id, safe='')}/proposals",
                      {"kind": "runbook", "body": {"team_id": alert.get("team_id"), "title": canonical["title"],
                                                   "canonical": canonical}})
     return {"proposal_id": p["id"]}

@@ -43,6 +43,10 @@ What makes a good mapping:
 - `match` pins exactly this schema: the source plus the values of its type-like fields (kind, schema, type, \
 eventType and the like). One source often sends sibling schemas in the same envelope (trade.booked.v1 next to \
 trade.rejected.v1); each gets its own mapping, and a match that also takes a sibling would read it wrong.
+- The tool shows you any sample of another schema seen so far that match would also take. The service tells schemas \
+apart by the values of type-like fields too, so it may be the same kind of event with another value (a Kubernetes \
+event with type Normal next to one with type Warning): then resubmit with its fingerprint in `also_covers`, so one \
+mapping covers both. If it is a different kind of event, narrow match instead.
 - `type` names what kind of event this is, for teams' rules to match on: a type-like field of the payload, or a \
 const when it has none. Never a free-text message or an id.
 - service, env, severity and ts come from the payload when it carries them. Leave a field out when it does not: the \
@@ -62,8 +66,33 @@ def _event(source_id: str, payload) -> dict:
     return {"event_id": "sample", "source_id": source_id, "received_at": RECEIVED, "payload": payload}
 
 
-def check(body: dict, source_id: str, sample: dict, existing: list[dict], others: list[dict]) -> list[str]:
-    """Every problem of `body` as the mapping for `sample`, as text the model can act on; [] when it is valid."""
+def _field_problems(new, sample, env: dict, at: str = "") -> list[str]:
+    """The field and dedup checks of `new` on one sample it takes; `env` is that sample's envelope."""
+    problems = []
+    for name, keys, const, fmt in new.fields:
+        where = f"{at}fields.{name}" + ("" if keys is None else f" (path '{'.'.join(keys)}')")
+        v = const if keys is None else resolve(sample, keys)
+        if v is MISSING:
+            problems.append(f"{where} does not resolve on the sample: use a path the sample has, or leave it out.")
+        elif name == "ts":
+            if env["mapping_id"] == new.id and env["ts"] == RECEIVED:
+                problems.append(f"{where} is {_json(v)}, which does not parse as format '{fmt}' "
+                                "(iso: an ISO 8601 string; epoch_ms, epoch_s: a number).")
+        elif (s := _scalar(v)) is None:
+            problems.append(f"{where} is {_json(v)}, but {name} needs a string or a number.")
+        elif name == "severity" and s.lower() not in new.severity_map and s.lower() not in SEV_RANK:
+            problems.append(f"{where} is {_json(v)}, which is not on the scale (info, warning, error, critical) "
+                            "and not a key of severity_map: add it to severity_map.")
+    for keys in new.dedup:
+        if resolve(sample, keys) is MISSING:
+            problems.append(f"{at}dedup_fields entry '{'.'.join(keys)}' does not resolve on the sample.")
+    return problems
+
+
+def check(body: dict, source_id: str, sample: dict, existing: list[dict], others: list[dict],
+          also_covers: list[str] = ()) -> list[str]:
+    """Every problem of `body` as the mapping for `sample` and for the samples of `others` whose fingerprints
+    `also_covers` lists, as text the model can act on; [] when it is valid."""
     mid, problems = body["id"], []
     if any(m.get("id") == mid for m in existing):
         problems.append(f"id '{mid}' belongs to an existing mapping and saving would overwrite it: pick a new id.")
@@ -76,33 +105,33 @@ def check(body: dict, source_id: str, sample: dict, existing: list[dict], others
     if new.match({"source": source_id, "raw": {}}):
         problems.append(f"match is true even for an empty payload, so it would take every payload from "
                         f"'{source_id}' that no other mapping takes: add leaves on this schema's payload values.")
+    if new.match({"source": f"not-{source_id}", "raw": sample}):
+        problems.append("match is true for this payload from any other source too, so it would take other sources' "
+                        f"events: add {json.dumps({'field': 'source', 'op': 'eq', 'value': source_id})}.")
+    if not any(f[0] == "type" for f in new.fields):
+        problems.append("fields.type is required: without it a mapped event cannot be told from an unmapped one.")
     env = build_envelope(_event(source_id, sample), compiled)
     if env["mapping_id"] != mid:
         problems.append(f"the sample is taken by the existing mapping '{env['mapping_id']}', which runs first"
                         if env["mapped"] else "match is false on the sample: check each leaf's path and value.")
+    problems += _field_problems(new, sample, env)
 
-    for name, keys, const, fmt in new.fields:
-        where = f"fields.{name}" + ("" if keys is None else f" (path '{'.'.join(keys)}')")
-        v = const if keys is None else resolve(sample, keys)
-        if v is MISSING:
-            problems.append(f"{where} does not resolve on the sample: use a path the sample has, or leave it out.")
-        elif name == "ts":
-            if env["mapping_id"] == mid and env["ts"] == RECEIVED:
-                problems.append(f"{where} is {_json(v)}, which does not parse as format '{fmt}' "
-                                "(iso: an ISO 8601 string; epoch_ms, epoch_s: a number).")
-        elif (s := _scalar(v)) is None:
-            problems.append(f"{where} is {_json(v)}, but {name} needs a string or a number.")
-        elif name == "severity" and s.lower() not in new.severity_map and s.lower() not in SEV_RANK:
-            problems.append(f"{where} is {_json(v)}, which is not on the scale (info, warning, error, critical) "
-                            "and not a key of severity_map: add it to severity_map.")
-    for keys in new.dedup:
-        if resolve(sample, keys) is MISSING:
-            problems.append(f"dedup_fields entry '{'.'.join(keys)}' does not resolve on the sample.")
-
+    covers, taken = set(also_covers), set()
     for o in others:
-        if build_envelope(_event(o["source_id"], o["sample"]), compiled)["mapping_id"] == mid:
-            problems.append(f"match also takes the sample of another schema from '{o['source_id']}': "
-                            f"{_json(o['sample'])}. Make match tell the two apart.")
+        o_env = build_envelope(_event(o["source_id"], o["sample"]), compiled)
+        if o_env["mapping_id"] != mid:
+            continue
+        ofp = o["fingerprint"]
+        taken.add(ofp)
+        if ofp in covers:  # the mapping will be applied to those events too
+            problems += _field_problems(new, o["sample"], o_env, f"on the sample {ofp}: ")
+        else:
+            problems.append(f"match also takes the sample of another schema from '{o['source_id']}' (fingerprint "
+                            f"{ofp}): {_json(o['sample'])}. If it is the same kind of event with a different value, "
+                            f"resubmit with \"{ofp}\" in also_covers; if it is a different kind of event, narrow "
+                            "match so it tells the two apart.")
+    problems += [f"also_covers lists '{fp}', but match does not take that sample (or there is none): remove it."
+                 for fp in sorted(covers - taken)]
     return problems
 
 
@@ -120,6 +149,10 @@ def _user(source_id: str, sample: dict, existing: list[dict]) -> str:
 
 def handle(job_input: dict, ctx) -> dict:
     fp, source_id, sample = job_input["fingerprint"], job_input["source_id"], job_input["sample"]
+    # a re-run after the save, or a mapping written meanwhile: never mark a mapped sample failed or shadow its mapping
+    compiled, _ = compile_mappings(ctx.mappings)
+    if (env := build_envelope(_event(source_id, sample), compiled))["mapped"]:
+        return {"skipped": f"already mapped by {env['mapping_id']}"}
 
     def fail(reason: str):
         ctx.api.put(f"/schema-samples/{quote(fp, safe='')}", {"status": "failed", "error": reason})
@@ -135,7 +168,7 @@ def handle(job_input: dict, ctx) -> dict:
 
     @beta_tool
     def submit_mapping(id: str, match: dict, fields: dict, severity_map: dict[str, str] | None = None,
-                       dedup_fields: list[str] | None = None) -> str:
+                       dedup_fields: list[str] | None = None, also_covers: list[str] | None = None) -> str:
         """Save the schema mapping for the sample event.
 
         The service's own code checks it against the sample first; if anything is wrong, nothing is saved and the
@@ -147,6 +180,7 @@ def handle(job_input: dict, ctx) -> dict:
             fields: Envelope fields from the payload, keys type, service, severity, env, ts, e.g. {"type": {"path": "meta.schema"}, "env": {"const": "prod"}, "ts": {"path": "meta.ts", "format": "epoch_ms"}}.
             severity_map: Optional. Payload severity values to the scale, e.g. {"P1": "critical", "WARN": "warning"}.
             dedup_fields: Optional. Payload paths that identify the same problem, e.g. ["payload.desk", "payload.reason"].
+            also_covers: Optional. Fingerprints of other samples the tool showed you that are the same kind of event as this one with a different value, so this mapping covers them too.
         """
         nonlocal saved, error, tries, problems
         if saved:
@@ -159,7 +193,7 @@ def handle(job_input: dict, ctx) -> dict:
             body["severity_map"] = severity_map
         if dedup_fields:
             body["dedup_fields"] = dedup_fields
-        problems = check(body, source_id, sample, ctx.mappings, ctx.other_samples())
+        problems = check(body, source_id, sample, ctx.mappings, ctx.other_samples(), also_covers or [])
         if not problems:
             try:
                 ctx.api.put(f"/mappings/{quote(id, safe='')}?fingerprint={quote(fp, safe='')}", body)
@@ -177,8 +211,11 @@ def handle(job_input: dict, ctx) -> dict:
     refused = None
     try:
         ctx.run_agent(SYSTEM, _user(source_id, sample, ctx.mappings), submit_mapping)
-    except JobFailed as e:
-        refused = str(e)
+    except Exception as e:
+        if not saved:  # once the tool has saved, the job is done whatever the SDK raises after it
+            if not isinstance(e, JobFailed):
+                raise
+            refused = str(e)
     if saved:
         return {"mapping_id": saved}
     if error is not None:

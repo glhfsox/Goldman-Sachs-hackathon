@@ -72,6 +72,8 @@ def test_validator_rejects_bad_matches_and_accepts_the_contract_example():
      "none"),
     ({"text": "Restart", "action": "restart_service", "approval": "none", "approval_quote": "approval: none"},
      "required"),  # not in the source
+    ({"text": "Restart", "action": "restart_service", "approval": "none", "approval_quote": "Restart the instance"},
+     "required"),  # in the source, but says nothing about approval
     ({"text": "Check", "action": "http_get", "params": {"url": "http://x/health"}, "approval": "required"}, "none"),
 ])
 def test_approval_is_decided_by_code(step, approval):
@@ -139,6 +141,17 @@ def test_propose_skips_without_finished_actions():
     doc["timeline"] = [e for e in doc["timeline"] if e["kind"] != "action_finished"]
     ctx, calls, _ = fake_ctx([], doc)
     assert "skipped" in runbooks.propose({"alert_id": "a-1"}, ctx) and calls == []
+
+
+def test_propose_caps_the_event_and_results_sent_to_the_model():
+    doc = alert_doc()
+    doc["alert"]["sample_event"]["raw"]["trace"] = "x" * 10000
+    doc["timeline"][-2]["data"]["action_run"]["result"] = {"body": "y" * 2000}
+    retry = {"text": "Retry the workflow", "action": "retry_workflow", "params": {"workflowId": "{{workflowId}}"}}
+    ctx, calls, replies = fake_ctx([{"title": "WORKFLOW_FAILED in prod", "steps": [retry]}], doc)
+    assert runbooks.propose({"alert_id": "a-1"}, ctx) == {"proposal_id": "prop-1"} and replies[0].startswith("Accepted")
+    user = calls[0][2]
+    assert "x" * 4000 not in user and "y" * 501 not in user and user.count("[truncated: ") == 2
 
 
 def test_propose_from_the_fixture_timeline():

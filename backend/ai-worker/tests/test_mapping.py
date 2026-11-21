@@ -49,9 +49,9 @@ class FakeApi:
         return body
 
 
-def run(sample, *submissions, source_id="alertmanager-http", others=()):
-    """handle() with a model that calls submit_mapping once per submission; returns (result or error, tool outputs,
-    api puts)."""
+def run(sample, *submissions, source_id="alertmanager-http", others=(), then_raise=None):
+    """handle() with a model that calls submit_mapping once per submission, then the SDK raises `then_raise`;
+    returns (result or error, tool outputs, api puts)."""
     outputs, api = [], FakeApi()
 
     def run_agent(system, user, tool):
@@ -61,6 +61,8 @@ def run(sample, *submissions, source_id="alertmanager-http", others=()):
                 outputs.append(tool.call(s))
             except ToolError as e:
                 outputs.append(f"ERROR {e}")
+        if then_raise:
+            raise then_raise
 
     ctx = SimpleNamespace(api=api, mappings=EXISTING, other_samples=lambda: list(others), run_agent=run_agent)
     try:
@@ -89,6 +91,9 @@ def _fields(**change):
     ({**GOOD_K8S, "match": {"all": [{"field": "source", "op": "eq", "value": "alertmanager-http"}]}},
      "match is true even for an empty payload"),
     ({**GOOD_K8S, "id": "alertmanager"}, "id 'alertmanager' belongs to an existing mapping"),
+    ({**GOOD_K8S, "match": {"all": GOOD_K8S["match"]["all"][1:]}},
+     'add {"field": "source", "op": "eq", "value": "alertmanager-http"}'),
+    ({**GOOD_K8S, "fields": {k: v for k, v in GOOD_K8S["fields"].items() if k != "type"}}, "fields.type is required"),
     ({**GOOD_K8S, "fields": {"type": {"path": "reason"}, "message": {"path": "message"}}}, "the mapping is not valid"),
 ])
 def test_invalid_mapping_is_not_saved_and_the_sample_is_marked_failed(submission, problem):
@@ -113,6 +118,28 @@ def test_a_match_that_also_takes_a_sibling_schema_is_rejected_then_fixed():
     assert "trade.booked.v1" in outputs[0]
     assert result == {"mapping_id": "trade-rejected-v1"} and "Saved" in outputs[1]
     assert [p for p, _ in puts] == ["/mappings/trade-rejected-v1?fingerprint=fp-1"]
+
+
+def test_another_value_of_the_same_schema_is_confirmed_with_also_covers():
+    others = [{"fingerprint": "fp-3", "source_id": "alertmanager-http", "sample": {**K8S, "type": "Normal"}}]
+    no_map = {**GOOD_K8S, "severity_map": {}}
+    result, outputs, puts = run(K8S, GOOD_K8S, {**no_map, "also_covers": ["fp-3", "fp-9"]},
+                                {**GOOD_K8S, "also_covers": ["fp-3"]}, others=others)
+    assert "(fingerprint fp-3)" in outputs[0] and '"type": "Normal"' in outputs[0] and "also_covers" in outputs[0]
+    assert "on the sample fp-3: fields.severity (path 'type') is \"Normal\", which is not on the scale" in outputs[1]
+    assert "also_covers lists 'fp-9'" in outputs[1]
+    assert result == {"mapping_id": "k8s-event"} and "Saved" in outputs[2]
+    assert "also_covers" not in puts[0][1]
+
+
+def test_a_sample_already_mapped_is_skipped_without_a_model_call():
+    result, outputs, puts = run({"alertname": "HighErrorRate", "labels": {}}, GOOD_K8S)
+    assert result == {"skipped": "already mapped by alertmanager"} and outputs == [] and puts == []
+
+
+def test_an_sdk_error_after_the_save_still_ends_the_job_done():
+    result, outputs, puts = run(K8S, GOOD_K8S, then_raise=RuntimeError("connection reset"))
+    assert result == {"mapping_id": "k8s-event"} and len(puts) == 1
 
 
 @pytest.mark.parametrize("sample", [["not", "an", "object"], {"_truncated": True, "_chars": 20000, "_preview": "{"}])

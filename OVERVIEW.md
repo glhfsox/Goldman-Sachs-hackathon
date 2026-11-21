@@ -367,6 +367,6 @@ each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-cr
 - Dedup and correlation windows: 5 minutes by default, per rule; an estimate, not measured.
 - Defaults that stand until someone objects: teams, people and on-call are seeded tables with no login
   and a user picker in the UI; the load test reports ingest → alert visible and ingest → mock channel
-  separately, with the duplicate ratio stated; Claude receives one truncated sample payload per new schema
-  and runbook text on upload.
+  separately, with the duplicate ratio stated; Claude receives one truncated sample payload per new schema,
+  runbook text on upload, and the event and timeline (capped) of a resolved alert on which people ran actions.
 - AC-5.1, AC-5.2 and AC-7.2 are still TBD: the design supports them, the thresholds are not set.

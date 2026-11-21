@@ -29,6 +29,15 @@ def test_claim_locks_the_row_until_finish(conns, db):
     assert jobs.claim(jobs_pg) is None
 
 
+def test_finished_at_is_the_end_of_the_job_not_the_claim(conns):
+    pg, jobs_pg = conns
+    jobs.enqueue(pg, "schema:a", "mapping", {})
+    job = jobs.claim(jobs_pg)
+    after_claim = pg.execute("SELECT clock_timestamp()").fetchone()[0]
+    jobs.finish(jobs_pg, job, result={})
+    assert pg.execute("SELECT finished_at FROM jobs").fetchone()[0] > after_claim
+
+
 def test_other_samples(conns):
     pg, jobs_pg = conns
     jobs.enqueue(pg, "schema:a", "mapping", {"n": 1})

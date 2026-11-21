@@ -15,8 +15,8 @@ the model so it can fix and resubmit, and saves the result through the api's RES
 against. A job is retried up to 3 times on unexpected errors (api down, model API errors); a refusal, a rejected
 submission or a 4xx from the api fails it at once.
 
-Status: the loop, queue, consumers and REST client are built; the three tools (`ai_worker/mapping.py`,
-`ai_worker/runbooks.py`) are placeholders that fail every job with "not implemented".
+Status: all three tools are built (`ai_worker/mapping.py`, `ai_worker/runbooks.py`) and were run end to end
+against the real Claude API; the api they save to is still the stub.
 
 ## Run
 
@@ -40,5 +40,22 @@ no job. The image also holds the processor's `core.py` and `models.py` (pure map
 
 ## What is sent to Claude
 
-Only the job's input, as untrusted data: one truncated sample payload per new schema, a runbook's source text, or
-one resolved alert with its timeline. Nothing the model writes is saved until code has validated it.
+Only the job's input, marked as untrusted data, with the job kind's system prompt. Nothing the model writes is saved
+until code has validated it.
+
+- `mapping`: the source id, the whole sample payload as the processor published it (the processor already cuts a
+  payload over 16 KB to a preview; such a sample fails the job without a model call), and the id and `match` of every
+  current mapping. The tool's error messages echo offending values, and the sample of another schema the mapping
+  would also take, as JSON cut to 600 characters (an api 422 body to 2,000).
+- `runbook`: the title, the format and the whole source text. A `link` runbook sends nothing.
+- `proposal`: the alert's title, type, env and service; its sample event with `raw` as JSON text cut to 4,000
+  characters; the timeline (time, actor, kind) with each action run, its `result` as JSON text cut to 500 characters.
+  A cut ends with a visible `[truncated: ...]` marker.
+
+## Known limits
+
+- A worker killed mid-job re-runs that job on its next start without counting an attempt. A `proposal` job that died
+  between the `POST` and the commit files a second proposal.
+- A `mapping` job that fails is not retried: the processor publishes one sample per schema, so a person writes that
+  mapping.
+- The stub api stands in for the real one.
