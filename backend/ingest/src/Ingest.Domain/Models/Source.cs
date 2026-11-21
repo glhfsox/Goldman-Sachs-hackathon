@@ -28,11 +28,7 @@ public class Source
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(config);
 
-        // A kafka source without a topic could never be consumed.
-        if (kind == SourceKind.Kafka)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(config.Topic);
-        }
+        EnsureConfigFitsKind(kind, config);
 
         return new Source
         {
@@ -42,5 +38,38 @@ public class Source
             Enabled = enabled,
             UpdatedAt = updatedAt
         };
+    }
+
+    // False when the change is not newer than the row: a replayed or reordered record must not win.
+    public bool ApplyChange(
+        SourceKind kind,
+        SourceConfig config,
+        bool enabled,
+        DateTimeOffset updatedAt)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        if (updatedAt <= UpdatedAt)
+        {
+            return false;
+        }
+
+        EnsureConfigFitsKind(kind, config);
+
+        Kind = kind;
+        Config = config;
+        Enabled = enabled;
+        UpdatedAt = updatedAt;
+
+        return true;
+    }
+
+    // A kafka source without a topic could never be consumed.
+    private static void EnsureConfigFitsKind(SourceKind kind, SourceConfig config)
+    {
+        if (kind == SourceKind.Kafka)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(config.Topic);
+        }
     }
 }
