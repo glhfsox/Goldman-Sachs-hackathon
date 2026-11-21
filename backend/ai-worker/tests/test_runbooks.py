@@ -9,6 +9,8 @@ import pytest
 
 from ai_worker import runbooks
 from ai_worker.agent import JobFailed
+from ai_worker.api import ApiError
+from anthropic.lib.tools import ToolError
 
 FIXTURE = json.loads((Path(__file__).parent.parent / "scripts" / "alert_fixture.json").read_text())
 MARKDOWN = """# HighErrorRate on payments-api
@@ -31,17 +33,42 @@ steps:
     approval: required"""
 
 
-def fake_ctx(submissions, alert_doc=None):
+ACTIONS = [{"name": n, "risk": r, "default_target": t} for n, r, t in [
+    ("http_get", "read_only", None), ("retry_workflow", "auto", "workflow-engine"), ("reload_db", "auto", "orders-db"),
+    ("restart_service", "approval", "services"), ("webhook", "approval", None), ("ticket", "approval", "ticketing"),
+    ("escalate", "approval", "escalation")]]
+TARGETS = [{"id": "pricing-engine", "origins": ["http://pricing-engine"], "operations": {
+    "http_get": {"method": "GET", "path": "/health"},
+    "restart_service": {"method": "POST", "path": "/instances/{instance}/restart"}}}]
+
+
+def fake_ctx(submissions, alert_doc=None, refuse=0, runbook=None):
+    """`refuse`: how many saves the api answers with 422 before it accepts one."""
     calls, replies = [], []
 
     def run_agent(system, user, tool):
         calls.append(("agent", system, user, tool.to_dict()))
-        replies.extend(tool.call(copy.deepcopy(s)) for s in submissions)
+        for s in submissions:
+            try:
+                replies.append(tool.call(copy.deepcopy(s)))
+            except ToolError as e:  # as agent._run_tool does: the error text goes back to the model
+                replies.append(str(e))
 
-    api = SimpleNamespace(get=lambda path: alert_doc,
-                          put=lambda path, body: calls.append(("PUT", path, body)),
-                          post=lambda path, body: calls.append(("POST", path, body)) or {"id": "prop-1"})
-    return SimpleNamespace(api=api, run_agent=run_agent), calls, replies
+    def save(method, path, body, headers=None):
+        calls.append((method, path, body))
+        if sum(c[0] in ("PUT", "POST") for c in calls) <= refuse:
+            raise ApiError(422, {"error": "invalid_runbook", "details": [
+                {"path": "steps[0].params", "message": "the step does not resolve to an action target"}]})
+        return {"id": "prop-1"}
+
+    def get(path):
+        return {"/actions": ACTIONS, "/action-targets": TARGETS}.get(path) or (
+            (runbook or {"status": "draft", "canonical": None, "version": 1}) if path.startswith("/runbooks/")
+            else alert_doc)
+
+    api = SimpleNamespace(get=get, put=lambda path, body: save("PUT", path, body),
+                          post=lambda path, body, headers=None: save("POST", path, body, headers))
+    return SimpleNamespace(api=api, run_agent=run_agent, job_id="job-1"), calls, replies
 
 
 def record(fmt, source):
@@ -55,15 +82,15 @@ def record(fmt, source):
     ({"text": "x", "action": "failover_region"}, "'failover_region' is not a registered action"),
 ])
 def test_validator_rejects_bad_steps(step, problem):
-    assert any(problem in p for p in runbooks.check_runbook({"id": "a", "title": "t", "steps": [step]}))
+    assert any(problem in p for p in runbooks.check_runbook({"id": "a", "title": "t", "steps": [step]}, {"http_get": True}))
 
 
 def test_validator_rejects_bad_matches_and_accepts_the_contract_example():
     bad = {"id": "a", "title": "t", "matches": {"all": [{"field": "type", "op": "gtt", "value": 1}]},
            "steps": [{"text": "x"}]}
-    assert any(p.startswith("matches.") for p in runbooks.check_runbook(bad))
+    assert any(p.startswith("matches.") for p in runbooks.check_runbook(bad, {}))
     ok = {**bad, "matches": {"all": [{"field": "type", "op": "eq", "value": "WORKFLOW_FAILED"}]}}
-    assert runbooks.check_runbook(ok) == []
+    assert runbooks.check_runbook(ok, {}) == []
 
 
 @pytest.mark.parametrize("step, approval", [
@@ -106,6 +133,30 @@ def test_convert_markdown_fixes_an_unregistered_action_then_saves():
     assert agent[3]["name"] == "submit_runbook"
     assert put == ("PUT", "/runbooks/rb-1", {"status": "active",
                                              "canonical": {"id": "rb-1", "title": "HighErrorRate", "steps": steps}})
+
+
+def test_convert_feeds_the_apis_refusal_back_to_the_model():
+    step = {"text": "Restart the pricing-engine instance", "action": "restart_service",
+            "params": {"target": "pricing-engine", "instance": "{{instance}}"}}
+    ctx, calls, replies = fake_ctx([{"steps": [{**step, "params": {"host": "x"}}]}, {"steps": [step]}], refuse=1)
+    assert runbooks.convert(record("text", "Restart the pricing-engine instance named in the alert"), ctx)["steps"] == 1
+    assert "steps[0].params: the step does not resolve" in replies[0] and replies[1].startswith("Accepted")
+    system = calls[0][1]
+    assert "pricing-engine (origins http://pricing-engine)" in system and "reload_db" in system
+    assert calls[-1][2]["canonical"]["steps"][0]["params"]["target"] == "pricing-engine"
+
+
+def test_an_api_outage_while_saving_stops_the_model_and_retries_the_job():
+    ctx, calls, replies = fake_ctx([{"steps": [{"text": "x"}]}, {"steps": [{"text": "x"}]}])
+    ctx.api.put = lambda path, body: (_ for _ in ()).throw(ConnectionRefusedError("api down"))
+    with pytest.raises(ConnectionRefusedError):  # not JobFailed: main.run_one retries it with backoff
+        runbooks.convert(record("text", "do things"), ctx)
+    assert replies == [runbooks.STOP, runbooks.STOP]
+
+
+def test_convert_skips_a_runbook_already_converted():
+    ctx, calls, _ = fake_ctx([], runbook={"status": "active", "canonical": {"id": "rb-1"}, "version": 2})
+    assert "skipped" in runbooks.convert(record("text", "do things"), ctx) and calls == []
 
 
 def test_convert_yaml_keeps_a_quoted_approval_none():

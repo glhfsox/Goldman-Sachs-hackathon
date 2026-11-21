@@ -123,8 +123,8 @@ def fake_ctx(resp, stats=None, alert=None):
         return resp
 
     api = SimpleNamespace(get=lambda path: calls.append(("GET", path)) or {"alert": alert},
-                          post=lambda path, body: calls.append(("POST", path, body)) or {"id": "prop-1"})
-    return SimpleNamespace(api=api, rules={"r1": RULE}, ask_jev=ask_jev, rule_stats=lambda rid: stats), calls
+                          post=lambda path, body, headers=None: calls.append(("POST", path, body)) or {"id": "prop-1"})
+    return SimpleNamespace(api=api, job_id="job-1", rules={"r1": RULE}, ask_jev=ask_jev, rule_stats=lambda rid: stats), calls
 
 
 STATS = {"window": {"max_alerts": 200, "max_age_days": 30}, "resolved_alerts": 20, "acked_share": 0.7,
@@ -249,8 +249,8 @@ def test_ask_jev_posts_the_request_and_sorts_errors(jev):
 
 @pytest.mark.parametrize("status, raised", [(404, RuntimeError), (422, ApiError)])
 def test_file_proposal_retries_an_alert_the_api_has_not_read_yet(status, raised):
-    def post(path, body):
+    def post(path, body, headers=None):
         raise ApiError(status, {"error": "x"})
 
     with pytest.raises(raised):  # RuntimeError retries the job (main.run_one), ApiError fails it
-        file_proposal(SimpleNamespace(post=post), "A1", "rule_severity", {})
+        file_proposal(SimpleNamespace(post=post), "A1", "rule_severity", {}, "job-1")

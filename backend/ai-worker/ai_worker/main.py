@@ -251,7 +251,7 @@ class Worker:
         log.info("running %s (attempt %d)", job["id"], job["attempts"] + 1)
         claude = KEYS[job["kind"]] == "ANTHROPIC_API_KEY"
         m, started = agent.new_metrics() if claude else {"jev_calls": 0, "jev_latency_ms": 0}, time.monotonic()
-        ctx = SimpleNamespace(api=self.api, mappings=list(self.mappings.values()),
+        ctx = SimpleNamespace(api=self.api, job_id=job["id"], mappings=list(self.mappings.values()),
                               other_samples=lambda: jobs.other_samples(self.jobs_pg, job["id"]),
                               run_agent=functools.partial(agent.run_agent, thread_id=job["id"], metrics=m),
                               rules=self.rules, ask_jev=_timed(m, judge.ask_jev),
