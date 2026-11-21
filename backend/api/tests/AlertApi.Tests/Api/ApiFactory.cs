@@ -22,7 +22,8 @@ public static class ApiFactory
         bool enableSwagger,
         string? redisUrl = null,
         bool runExecutor = false,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        bool riskCheck = false)
     {
         var database = $"api_{Guid.NewGuid():N}";
         var builder = new Npgsql.NpgsqlConnectionStringBuilder(postgres.ConnectionString);
@@ -45,6 +46,8 @@ public static class ApiFactory
             // Tests that look at a run's first state must not race a worker; the executor tests switch it on.
             host.UseSetting("RUNBOOK_EXECUTOR", runExecutor ? "true" : "false");
             host.UseSetting("RUNBOOK_POLL_MS", "50");
+            // Off by default so older tests start an auto run at its start time; the risk check tests switch it on.
+            host.UseSetting("RUNBOOK_RISK_CHECK", riskCheck ? "true" : "false");
             host.UseSetting("ENABLE_SWAGGER", enableSwagger ? "true" : "false");
             // Tests feed records to the handler directly; no consumer should poll a broker that does not exist.
             host.ConfigureServices(services =>

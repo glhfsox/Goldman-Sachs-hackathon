@@ -84,7 +84,8 @@ builder.Services.AddScoped<IRunbookStartRepository, RunbookStartRepository>();
 builder.Services.AddScoped<IRunbookStartService, RunbookStartService>();
 builder.Services.AddSingleton(new RunAutomationOptions
 {
-    CancelWindow = TimeSpan.FromSeconds(builder.Configuration.GetValue("RUNBOOK_CANCEL_WINDOW_S", 30))
+    CancelWindow = TimeSpan.FromSeconds(builder.Configuration.GetValue("RUNBOOK_CANCEL_WINDOW_S", 30)),
+    RiskCheck = builder.Configuration.GetValue("RUNBOOK_RISK_CHECK", true)
 });
 builder.Services.AddScoped<IRunAutomation, RunAutomationService>();
 

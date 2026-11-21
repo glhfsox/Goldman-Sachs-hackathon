@@ -28,11 +28,19 @@ public sealed class RunbookRunConfiguration : IEntityTypeConfiguration<RunbookRu
         builder.Property(run => run.FinishedAt).HasColumnName("finished_at");
         builder.Property(run => run.CancelledBy).HasColumnName("cancelled_by");
         builder.Property(run => run.TriggerChangeId).HasColumnName("trigger_change_id");
+        builder.Property(run => run.RiskCheckVerdict).HasColumnName("risk_check_verdict");
+        builder.Property(run => run.RiskCheckConfidence).HasColumnName("risk_check_confidence");
+        builder.Property(run => run.RiskCheckReasons).HasColumnName("risk_check_reasons");
+        builder.Property(run => run.RiskCheckBy).HasColumnName("risk_check_by");
+        builder.Property(run => run.RiskCheckAt).HasColumnName("risk_check_at");
         builder.Ignore(run => run.IsLive);
         builder.HasIndex(run => run.TriggerChangeId)
             .IsUnique()
             .HasFilter("trigger_change_id is not null")
             .HasDatabaseName("UQ_runbook_runs_trigger_change_id");
+        builder.HasIndex(run => run.Status)
+            .HasFilter("status = 'scheduled' and risk_check_verdict is null")
+            .HasDatabaseName("IX_runbook_runs_risk_check_pending");
         builder.HasIndex(run => run.StartAt)
             .HasFilter("status = 'scheduled'")
             .HasDatabaseName("IX_runbook_runs_scheduled_start_at");
@@ -41,7 +49,7 @@ public sealed class RunbookRunConfiguration : IEntityTypeConfiguration<RunbookRu
         // One live run per alert, enforced by the database so two replicas cannot both start one.
         builder.HasIndex(run => run.AlertId)
             .IsUnique()
-            .HasFilter("status in ('scheduled', 'running')")
+            .HasFilter("status in ('scheduled', 'waiting_approval', 'running')")
             .HasDatabaseName(RunConstraints.LiveRunPerAlert);
         builder.HasIndex(run => new { run.AlertId, run.CreatedAt }).HasDatabaseName("IX_runbook_runs_alert_id_created_at");
     }

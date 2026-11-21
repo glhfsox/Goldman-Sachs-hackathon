@@ -673,6 +673,26 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("risk");
 
+                    b.Property<DateTimeOffset?>("RiskCheckAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("risk_check_at");
+
+                    b.Property<string>("RiskCheckBy")
+                        .HasColumnType("text")
+                        .HasColumnName("risk_check_by");
+
+                    b.Property<double?>("RiskCheckConfidence")
+                        .HasColumnType("double precision")
+                        .HasColumnName("risk_check_confidence");
+
+                    b.Property<string>("RiskCheckReasons")
+                        .HasColumnType("text")
+                        .HasColumnName("risk_check_reasons");
+
+                    b.Property<string>("RiskCheckVerdict")
+                        .HasColumnType("text")
+                        .HasColumnName("risk_check_verdict");
+
                     b.Property<string>("RuleId")
                         .IsRequired()
                         .HasColumnType("text")
@@ -720,11 +740,15 @@ namespace AlertApi.Infrastructure.Migrations
                     b.HasIndex("AlertId")
                         .IsUnique()
                         .HasDatabaseName("UQ_runbook_runs_live_alert")
-                        .HasFilter("status in ('scheduled', 'running')");
+                        .HasFilter("status in ('scheduled', 'waiting_approval', 'running')");
 
                     b.HasIndex("StartAt")
                         .HasDatabaseName("IX_runbook_runs_scheduled_start_at")
                         .HasFilter("status = 'scheduled'");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_runbook_runs_risk_check_pending")
+                        .HasFilter("status = 'scheduled' and risk_check_verdict is null");
 
                     b.HasIndex("TriggerChangeId")
                         .IsUnique()

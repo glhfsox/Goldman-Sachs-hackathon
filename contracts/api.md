@@ -62,7 +62,7 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `GET /alerts/{id}/runs/preview?runbook_id=` | | `{runbook_id, runbook_version, risk, nodes: [{id, text, action, risk, params, missing}]}`: what starting a run would do, with every `{{placeholder}}` filled. `missing` lists the placeholders the alert has no value for (that step starts `blocked`) |
 | `POST /alerts/{id}/runs` | `{runbook_id}`, `X-User` of a person | `RunbookRun`, `201`, `running` at once; the person's start is the approval, whatever the risk. `403` for a service actor, `404` unknown alert or runbook, `409` when the alert has a live run, is resolved, or the runbook is not `active`, not accepted (`accepted_by`) or another team's, `422 invalid_run` without `runbook_id` or `422 invalid_runbook` when a step does not resolve |
 | `GET /runs/{id}` | | `RunbookRun` with every node |
-| `POST /runs/{id}/cancel` | none, `X-User` of a person | `RunbookRun`, `cancelled`: every step not yet started is `cancelled`, a running one finishes. `409` unless the run is `scheduled` or `running` |
+| `POST /runs/{id}/cancel` | none, `X-User` of a person | `RunbookRun`, `cancelled`: every step not yet started is `cancelled`, a running one finishes. `409` unless the run is `scheduled`, `waiting_approval` or `running` |
 | `POST /runs/{id}/nodes/{node}/done` | none, `X-User` of a person | The node, `succeeded`. Only for a text-only step that is still `pending` in a live run, otherwise `409` |
 | `POST /alerts/{id}/proposals` | `{kind, body}` with `X-User` (a person or `ai-worker`), optional header `Idempotency-Key` (a retrying client sends a stable job id) | `Proposal`, `201`. A repeated `Idempotency-Key` returns the first proposal with `200` whatever the body; without a key, an identical open proposal (same alert, kind and body) is returned with `200` instead of a second one. `422 invalid_proposal` (one `details` entry per wrong path, each starting with `body.` or `kind`), `404` for an unknown alert or an `X-User` that is neither a user nor `ai-worker` |
 | `GET /proposals?status=&limit=` | | `[Proposal]`, newest first; `status` is `open`, `accepted` or `rejected`; `limit` defaults to 50, at most 200 |
@@ -85,7 +85,7 @@ A `Runbook` is `{id, team_id, title, format, source, canonical, status, version,
 
 `incident` in `GET /alerts/{id}` is `null` until incidents are built. `runbook` is how far the alert's latest run has got, or `null`
 when no run was started: `{run_id, runbook_id, status, steps_total, steps_done, steps: [{node, status}]}`. `status` is the run's
-(`scheduled`, `running`, `done`, `failed`, `cancelled`); a step's is its node's ([runbooks.md](runbooks.md) §2). `steps_done` counts
+(`scheduled`, `waiting_approval`, `running`, `done`, `failed`, `cancelled`); a step's is its node's ([runbooks.md](runbooks.md) §2). `steps_done` counts
 `succeeded` and `skipped` steps, so a text-only step counts once a person ticks it. The UI refetches the alert on the
 `timeline` message the api pushes after every run or step change.
 
@@ -132,17 +132,17 @@ Accepting it sets the rule's `severity` to `body.severity` (a `PUT /rules/{rule_
              "median 4 events per alert"]}}
 ```
 
-### Runbook runs: `GET /runs?risk_check=`, `?finished_since=` and the risk-check endpoints are not served yet (issue #75)
+### Runbook runs: risk check, approval and `GET /runs` (issue #75)
 
 On top of the run model of issue #73 (run risk `read_only` / `auto` / `approval`; an `auto` run is created
-`scheduled` with `start_at` = now + cancel window). `backend/ai-worker/scripts/stub_api.py` serves these as the
-reference until the api does.
+`scheduled` with `start_at` = now + cancel window). The api serves all of this; `RUNBOOK_RISK_CHECK=false` turns the
+check off ([services.md](services.md)).
 
 | Method and path | Body | Returns |
 |---|---|---|
 | `GET /runs?risk_check=pending` | | `[RunbookRun]`: status `scheduled`, risk `auto`, `risk_check: null`. The ai-worker polls it every 2 s |
 | `POST /runs/{id}/risk-check` | `{verdict, confidence, reasons}`, `X-User: ai-worker` | `RunbookRun`. While the run is `scheduled` a `hold` always applies (the run goes to `waiting_approval`), even over an earlier `clear`; a second `clear` changes nothing. `409` when the run is no longer `scheduled` (so a `clear` after a `hold` changes nothing); the same verdict twice changes nothing |
-| `POST /runs/{id}/approve` | none, `X-User` of a person | `RunbookRun`, now `running`. `403` for a service actor |
+| `POST /runs/{id}/approve` | none, `X-User` of a person | `RunbookRun`, now `running`. `403` for a service actor, `409` unless the run is `waiting_approval` |
 | `GET /runs?finished_since=<ISO time>&limit=` | | `[RunbookRun]` with status `done`, `failed` or `cancelled`, oldest first. The ai-worker polls it every 30 s from 5 minutes before the newest run it holds |
 
 - `verdict`: `clear` (the run starts at `start_at`) or `hold` (it goes to `waiting_approval` with the reasons and
@@ -153,7 +153,12 @@ reference until the api does.
 - A `RunbookRun` has `id`, `alert_id`, `rule_id`, `team_id`, `runbook_id`, `runbook_version`, `risk`, `trigger` (`auto` or
   `manual`), `status`, `start_at`, `approved_by`, `approved_at`, `started_at`, `finished_at`, `cancelled_by` and
   `nodes: [{id, step_index, text, action, risk, params, needs, status, attempt, result, started_at, finished_at}]` with
-  params filled. `risk_check` (`{verdict, confidence, reasons}` or null) comes with step 5.
+  params filled. `risk_check` is `{verdict, confidence, reasons, by, at}` or null; when no verdict came by `start_at`
+  it is `{verdict: "hold", confidence: null, reasons: ["risk check did not answer"], by: "runbook-scheduler"}`.
+- A body with another `verdict`, a `confidence` outside 0 to 1 or missing, or more than 6 reasons is `422 invalid_run`; any
+  `X-User` but `ai-worker` is `403`. `GET /runs` without `risk_check=pending` or `finished_since` is `422`; `limit` is 100 by default, 500 at most.
+- Timeline rows: `run_cleared` and `run_held` (`data.reasons`), then `run_started` when a person approves. A `waiting_approval`
+  run counts as live: it blocks a new run on the alert and `resolved` cancels it.
 
 ```json
 POST /api/runs/run-7f3a/risk-check

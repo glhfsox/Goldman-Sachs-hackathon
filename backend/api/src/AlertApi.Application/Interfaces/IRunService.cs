@@ -16,4 +16,13 @@ public interface IRunService
 
     // A person ticks a text-only step.
     Task<RunNodeResponse> TickAsync(string id, string node, string? userId, CancellationToken cancellationToken = default);
+
+    // The ai-worker's verdict on a scheduled `auto` run. `hold` sends it to a person; `clear` lets it start at its start time.
+    Task<RunResponse> RiskCheckAsync(string id, RiskCheckRequest request, string? userId, CancellationToken cancellationToken = default);
+
+    // A person approves a held run; it starts at once.
+    Task<RunResponse> ApproveAsync(string id, string? userId, CancellationToken cancellationToken = default);
+
+    // Runs the ai-worker polls: `pending` (scheduled, auto, no verdict yet) or finished since a time.
+    Task<IReadOnlyList<RunResponse>> ListAsync(string? riskCheck, DateTimeOffset? finishedSince, int? limit, CancellationToken cancellationToken = default);
 }

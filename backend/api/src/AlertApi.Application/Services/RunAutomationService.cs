@@ -11,6 +11,7 @@ namespace AlertApi.Application.Services;
 public sealed class RunAutomationService : IRunAutomation
 {
     private const string Actor = "runbook-scheduler";
+    private const string UnansweredReasons = "[\"risk check did not answer\"]";
 
     private readonly IRunRepository _runs;
     private readonly IRunbookRepository _runbooks;
@@ -152,7 +153,25 @@ public sealed class RunAutomationService : IRunAutomation
         var now = _timeProvider.GetUtcNow();
 
         await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        var run = await _runs.ClaimDueScheduledAsync(now, cancellationToken);
+
+        // A run nobody answered for must not start unchecked: it goes to a person instead.
+        var held = _options.RiskCheck
+            ? await _runs.HoldUnansweredAsync(now, Actor, UnansweredReasons, cancellationToken)
+            : null;
+
+        if (held is not null)
+        {
+            await _events.AddAsync(
+                RunTimeline.Create($"run-held:{held.Id}", held, Actor, "run_held", now, reasons: ["risk check did not answer"]),
+                cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            await _ui.PublishTimelineAsync(held.AlertId, cancellationToken);
+
+            return true;
+        }
+
+        var run = await _runs.ClaimDueScheduledAsync(now, _options.RiskCheck, cancellationToken);
 
         if (run is null)
         {

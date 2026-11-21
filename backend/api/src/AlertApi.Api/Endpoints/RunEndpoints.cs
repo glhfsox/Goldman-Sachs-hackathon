@@ -25,6 +25,18 @@ public static class RunEndpoints
 
         var group = app.MapGroup("api/runs").WithTags("Runs");
 
+        group.MapGet("", List)
+            .WithName("ListRuns")
+            .WithSummary("Lists runs for the ai-worker: ?risk_check=pending (waiting for a verdict) or ?finished_since=<time>&limit= (oldest first).");
+
+        group.MapPost("{id}/risk-check", RiskCheck)
+            .WithName("PostRunRiskCheck")
+            .WithSummary("The ai-worker's verdict on a scheduled auto run: clear lets it start, hold sends it to a person. Only X-User ai-worker.");
+
+        group.MapPost("{id}/approve", Approve)
+            .WithName("ApproveRun")
+            .WithSummary("A person approves a run held in waiting_approval; it starts at once.");
+
         group.MapGet("{id}", GetById)
             .WithName("GetRunById")
             .WithSummary("Returns a run with every step and its state.");
@@ -94,5 +106,40 @@ public static class RunEndpoints
         var result = await service.TickAsync(id, node, user, cancellationToken);
 
         return TypedResults.Ok(result);
+    }
+
+    private static async Task<Ok<IReadOnlyList<RunResponse>>> List(
+        [FromQuery(Name = "risk_check")] string? riskCheck,
+        [FromQuery(Name = "finished_since")] DateTimeOffset? finishedSince,
+        [FromQuery] int? limit,
+        IRunService service,
+        CancellationToken cancellationToken)
+    {
+        var runs = await service.ListAsync(riskCheck, finishedSince, limit, cancellationToken);
+
+        return TypedResults.Ok(runs);
+    }
+
+    private static async Task<Ok<RunResponse>> RiskCheck(
+        string id,
+        [FromBody] RiskCheckRequest request,
+        [FromHeader(Name = "X-User")] string? user,
+        IRunService service,
+        CancellationToken cancellationToken)
+    {
+        var run = await service.RiskCheckAsync(id, request, user, cancellationToken);
+
+        return TypedResults.Ok(run);
+    }
+
+    private static async Task<Ok<RunResponse>> Approve(
+        string id,
+        [FromHeader(Name = "X-User")] string? user,
+        IRunService service,
+        CancellationToken cancellationToken)
+    {
+        var run = await service.ApproveAsync(id, user, cancellationToken);
+
+        return TypedResults.Ok(run);
     }
 }

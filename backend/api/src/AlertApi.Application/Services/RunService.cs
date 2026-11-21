@@ -13,6 +13,11 @@ namespace AlertApi.Application.Services;
 
 public sealed class RunService : IRunService
 {
+    private const string AiWorker = "ai-worker";
+    private const int MaxReasons = 6;
+    private const int DefaultListLimit = 100;
+    private const int MaxListLimit = 500;
+
     private readonly IRunRepository _runs;
     private readonly IAlertRepository _alerts;
     private readonly IAlertEventRepository _events;
@@ -162,6 +167,132 @@ public sealed class RunService : IRunService
         await _ui.PublishTimelineAsync(run.AlertId, cancellationToken);
 
         return RunNodeResponse.From(target);
+    }
+
+    public async Task<RunResponse> RiskCheckAsync(
+        string id,
+        RiskCheckRequest request,
+        string? userId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (userId != AiWorker)
+        {
+            throw new RiskCheckerRequiredException(userId);
+        }
+
+        var problems = new List<ProblemItem>();
+
+        if (request.Verdict is not (RunbookRun.Clear or RunbookRun.Hold))
+        {
+            problems.Add(new ProblemItem("verdict", "must be 'clear' or 'hold'"));
+        }
+
+        if (request.Confidence is null or < 0 or > 1)
+        {
+            problems.Add(new ProblemItem("confidence", "must be a number from 0 to 1"));
+        }
+
+        var reasons = (request.Reasons ?? []).Select(reason => reason?.Trim() ?? string.Empty).ToList();
+
+        if (reasons.Count > MaxReasons || reasons.Any(reason => reason.Length == 0))
+        {
+            problems.Add(new ProblemItem("reasons", $"must be at most {MaxReasons} non-empty sentences"));
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidRunRequestException(problems);
+        }
+
+        // The run row is locked until the save, so a verdict and the scheduler's start cannot both win.
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        await _runs.LockAsync(id, cancellationToken);
+
+        var run = await GetRunAsync(id, cancellationToken);
+
+        if (run.RiskCheckVerdict == request.Verdict)
+        {
+            return RunResponse.From(run, await _runs.GetNodesAsync(id, cancellationToken));
+        }
+
+        if (run.Status != RunbookRun.Scheduled)
+        {
+            throw new RunStateConflictException(id, $"it is {run.Status}, so it takes no risk check now");
+        }
+
+        var now = _timeProvider.GetUtcNow();
+
+        run.RecordRiskCheck(request.Verdict!, request.Confidence, JsonSerializer.Serialize(reasons, RecordJson.Options), userId, now);
+
+        if (request.Verdict == RunbookRun.Hold)
+        {
+            await _events.AddAsync(RunTimeline.Create($"run-held:{run.Id}", run, userId, "run_held", now, reasons: reasons), cancellationToken);
+        }
+        else
+        {
+            await _events.AddAsync(RunTimeline.Create($"run-cleared:{run.Id}", run, userId, "run_cleared", now, reasons: reasons), cancellationToken);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        await _ui.PublishTimelineAsync(run.AlertId, cancellationToken);
+
+        return RunResponse.From(run, await _runs.GetNodesAsync(id, cancellationToken));
+    }
+
+    public async Task<RunResponse> ApproveAsync(string id, string? userId, CancellationToken cancellationToken = default)
+    {
+        var user = await RequirePersonAsync(userId, "approve a run", cancellationToken);
+
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        await _runs.LockAsync(id, cancellationToken);
+
+        var run = await GetRunAsync(id, cancellationToken);
+
+        if (run.Status != RunbookRun.WaitingApproval)
+        {
+            throw new RunStateConflictException(id, $"it is {run.Status}, so there is nothing to approve");
+        }
+
+        var now = _timeProvider.GetUtcNow();
+
+        run.Approve(user, now);
+        await AddEventAsync($"run-started:{run.Id}", run, user, "run_started", now, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        await _ui.PublishTimelineAsync(run.AlertId, cancellationToken);
+
+        return RunResponse.From(run, await _runs.GetNodesAsync(id, cancellationToken));
+    }
+
+    public async Task<IReadOnlyList<RunResponse>> ListAsync(
+        string? riskCheck,
+        DateTimeOffset? finishedSince,
+        int? limit,
+        CancellationToken cancellationToken = default)
+    {
+        var take = Math.Clamp(limit ?? DefaultListLimit, 1, MaxListLimit);
+        IReadOnlyList<RunbookRun> runs;
+
+        if (riskCheck == "pending")
+        {
+            runs = await _runs.ListPendingRiskCheckAsync(take, cancellationToken);
+        }
+        else if (finishedSince is not null)
+        {
+            runs = await _runs.ListFinishedSinceAsync(finishedSince.Value, take, cancellationToken);
+        }
+        else
+        {
+            throw new InvalidRunRequestException([new ProblemItem("query", "needs risk_check=pending or finished_since=<time>")]);
+        }
+
+        var nodes = (await _runs.GetNodesForRunsAsync(runs.Select(run => run.Id).ToList(), cancellationToken))
+            .ToLookup(node => node.RunId);
+
+        return runs.Select(run => RunResponse.From(run, nodes[run.Id].ToList())).ToList();
     }
 
     private async Task AddEventAsync(
