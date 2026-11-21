@@ -2,9 +2,11 @@
 
     uv run python scripts/load.py 100000 --dup 0.9 [--rate 5000]      (from backend/processor)
 
-Events cycle through the brief's three schemas (tests/conftest.py PAYLOADS). Event i belongs to alert key
-i % K, with K = N * (1 - dup), so a share `dup` of the events repeat a key already seen. Keys carry a run tag,
-so every run opens fresh alerts. Prints, all measured:
+Events cycle through the brief's three schemas (tests/conftest.py PAYLOADS). K = N * (1 - dup) alert keys are
+introduced at a constant rate over the run, key j at event j * N / K (event 0 is always new); every other event
+repeats a random key already introduced (seeded, so runs are alike), so a share `dup` of the events are
+duplicates and the load looks like steady state, not a burst of new alerts. Keys carry a run tag, so every run
+opens fresh alerts. Prints, all measured:
 - publish rate;
 - processed events/s: first publish until the `processor` group's committed offsets reach the end offsets;
 - ingest -> alert visible: Kafka timestamp of each `opened` record on alerts.changes minus its
@@ -15,6 +17,7 @@ import argparse
 import copy
 import json
 import os
+import random
 import sys
 import threading
 import time
@@ -100,11 +103,16 @@ def main() -> None:
         if err is None:
             per_partition[msg.partition()] = per_partition.get(msg.partition(), 0) + 1
 
+    rng, introduced = random.Random(1), 0
     start = time.time()
     for i in range(a.n):
         if a.rate and (ahead := start + i / a.rate - time.time()) > 0:
             time.sleep(ahead)
-        source, payload = payload_for(i % keys, run)
+        if introduced < keys and introduced * a.n <= i * keys:  # the next key is due
+            k, introduced = introduced, introduced + 1
+        else:
+            k = rng.randrange(introduced)
+        source, payload = payload_for(k, run)
         event = {"event_id": f"{run}-{i}", "source_id": source,
                  "received_at": datetime.now(UTC).isoformat(timespec="milliseconds")[:-6] + "Z", "payload": payload}
         while True:

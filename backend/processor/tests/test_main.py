@@ -56,12 +56,14 @@ class FakeConfig:
 
 
 class FakeRelay:
+    """`full`: how many drains in a row return a full batch."""
     def __init__(self, calls):
-        self.calls = calls
+        self.calls, self.full = calls, 0
 
     def drain(self, limit=500):
         self.calls.append("relay.drain")
-        return 0
+        self.full -= 1
+        return limit if self.full >= 0 else 0
 
 
 T0 = datetime(2026, 11, 20, 10, 15, 2, 123000, tzinfo=UTC)  # received_at of make_event
@@ -230,6 +232,17 @@ def test_auto_resolve_runs_every_5_s_with_the_wall_clock_before_the_drain(world,
     assert len(seen) == 1
 
 
+def test_relay_drains_again_while_batches_are_full_up_to_a_bound(world):
+    from processor.main import DRAIN_ROUNDS
+    world.proc.relay.full = 2
+    world.proc.step()
+    assert world.calls.count("relay.drain") == 3
+    world.calls.clear()
+    world.proc.relay.full = 100
+    world.proc.step()
+    assert world.calls.count("relay.drain") == DRAIN_ROUNDS
+
+
 def test_empty_batch_still_runs_housekeeping_and_drains(world):
     world.clock[0] = 2.0
     world.proc.step()
@@ -349,10 +362,11 @@ def test_unmapped_sample_is_repaired(world, sql):
 def test_a_data_error_in_the_store_skips_only_that_record(world, sql, monkeypatch, caplog):
     real_open = world.store._open
 
-    def open_(it):
-        if it.envelope["event_id"] == "evt-1":
+    def open_(items):  # the batch applies the other records, then fails on evt-1
+        out = real_open([it for it in items if it.envelope["event_id"] != "evt-1"])
+        if len(out) < len(items):
             raise psycopg.DataError("rejected by the store")
-        return real_open(it)
+        return out
     monkeypatch.setattr(world.store, "_open", open_)
     world.consumer.queue = [Msg(event("workflow", 0), 0), Msg(event("trade", 1), 1), Msg(event("metric", 2), 2)]
     with caplog.at_level(logging.WARNING, logger="processor"):
@@ -485,8 +499,11 @@ class KafkaStub:
         self.conf = conf
         KafkaStub.made.append(self)
 
-    def subscribe(self, topics):
-        self.topics = topics
+    def subscribe(self, topics, on_assign=None):
+        self.topics, self.on_assign = topics, on_assign
+
+    def assign(self, partitions):
+        self.assigned = [(p.topic, p.partition, p.offset) for p in partitions]
 
     def consume(self, num_messages, timeout):
         raise Stop
@@ -517,9 +534,25 @@ def test_kafka_clients_are_configured_for_safe_commits_and_delivery(main_env):
     assert consumers["events.raw"]["enable.auto.commit"] is False
     assert consumers["config.changes"]["enable.auto.commit"] is False
     assert {k: consumers["alerts.changes"][k] for k in ("group.id", "enable.auto.commit", "auto.offset.reset")} == {
-        "group.id": "processor-changes", "enable.auto.commit": False, "auto.offset.reset": "earliest"}
+        "group.id": "processor-changes", "enable.auto.commit": False, "auto.offset.reset": "latest"}
+    assert consumers["events.raw"]["auto.offset.reset"] == consumers["config.changes"]["auto.offset.reset"] == "earliest"
     # every message of a drain gets its final delivery callback within that drain's flush
     assert producer["message.timeout.ms"] < FLUSH_TIMEOUT_S * 1000 and producer["enable.idempotence"] is True
+
+
+def test_config_partitions_start_from_the_beginning_only_when_mappings_and_rules_are_empty(main_env, conns):
+    from confluent_kafka import OFFSET_BEGINNING, OFFSET_INVALID, TopicPartition
+    c = conns()
+    c.execute("TRUNCATE mappings, rules, service_deps")
+    with pytest.raises(Stop):
+        main_env.main()
+    [stub] = [s for s in KafkaStub.made if getattr(s, "topics", None) == ["config.changes"]]
+    stub.on_assign(stub, [TopicPartition("config.changes", 0)])
+    assert stub.assigned == [("config.changes", 0, OFFSET_BEGINNING)]
+    c.execute("INSERT INTO rules (id, body, updated_at) VALUES ('r1', '{}', now())")
+    stub.on_assign(stub, [TopicPartition("config.changes", 0)])
+    assert stub.assigned == [("config.changes", 0, OFFSET_INVALID)]  # the committed offset
+    c.execute("TRUNCATE rules")
 
 
 def test_one_worker_by_default_runs_in_process(main_env, monkeypatch):

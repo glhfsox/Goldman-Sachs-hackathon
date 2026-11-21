@@ -81,6 +81,17 @@ _UPDATE = (
     " last_seen = %(last_seen)s, last_received_at = %(last_received_at)s,"
     " acked_by = %(acked_by)s, resolved_by = %(resolved_by)s WHERE id = %(id)s")
 
+_REOPEN = (
+    "UPDATE alerts SET status = 'open', acked_by = NULL, resolved_by = NULL, count = count + 1,"
+    " severity = %s, last_seen = GREATEST(last_seen, %s), last_received_at = GREATEST(last_received_at, %s),"
+    " opened_by_event = %s, opened_partition = %s, opened_offset = %s, window_s = %s WHERE id = %s RETURNING *")
+
+_INSERT = (
+    "INSERT INTO alerts (id, alert_key, rule_id, team_id, status, severity, title, body, fields,"
+    " color, count, first_seen, last_seen, first_received_at, last_received_at, runbook_id,"
+    " sample_event, opened_by_event, opened_partition, opened_offset, window_s)"
+    " VALUES (%s, %s, %s, %s, 'open', %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *")
+
 _ALERT_FIELDS = (
     "id", "rule_id", "team_id", "incident_id", "status", "severity", "title", "body", "fields", "color",
     "count", "first_seen", "last_seen", "first_received_at", "runbook_id", "acked_by", "resolved_by",
@@ -193,8 +204,7 @@ class Store:
                         first[key] = i
                 elif res == RAISED:
                     raised.add(key)
-            for i in first.values():
-                row, counted = self._open(todo[i])
+            for i, (row, counted) in zip(first.values(), self._open([todo[i] for i in first.values()]) if first else []):
                 seeds.append((row, todo[i]))
                 if not counted:
                     again.add(i)
@@ -202,60 +212,73 @@ class Store:
         if raised:
             self.flush(raised)  # a severity raise should not wait for the next flush tick
 
-    def _open(self, it: Item) -> tuple[dict, bool]:
-        """Miss path: find, reopen or insert the alert. Returns the row and whether this event is already in its count."""
-        env, m = it.envelope, it.match
-        received = datetime.fromisoformat(env["received_at"])
+    def _open(self, items: list[Item]) -> list[tuple[dict, bool]]:
+        """Miss path for items with distinct alert keys: find, reopen or insert each alert, all in one transaction with
+        a fixed number of round trips. Returns, in item order, the row and whether that event is already in its count."""
+        keys = [it.match.alert_key for it in items]
         for _ in range(3):
             try:
                 with self.pg.transaction(), self.pg.cursor(row_factory=dict_row) as cur:
-                    cur.execute("SELECT * FROM alerts WHERE alert_key = %s AND status <> 'resolved'", (m.alert_key,))
-                    if row := cur.fetchone():  # the hash expired or Redis lost it; a redelivered opener is already counted
-                        return row, row["opened_by_event"] == env["event_id"]
+                    cur.execute("SELECT * FROM alerts WHERE alert_key = ANY(%s) AND status <> 'resolved'", (keys,))
+                    out = {row["alert_key"]: row for row in cur.fetchall()}
+                    # the hash expired or Redis lost it; a redelivered opener is already counted
+                    out = {k: (row, row["opened_by_event"] == it.envelope["event_id"])
+                           for it in items if (row := out.get(k := it.match.alert_key))}
+                    rest = sorted((it for it in items if it.match.alert_key not in out), key=lambda it: it.match.alert_key)
+                    # the latest resolved row per key, locked in id order like flush; the outer status re-checks each row once locked
                     cur.execute(
-                        "SELECT * FROM alerts WHERE alert_key = %s AND status = 'resolved'"
-                        " ORDER BY last_received_at DESC LIMIT 1 FOR UPDATE", (m.alert_key,))
-                    old = cur.fetchone()
-                    if old and old["opened_by_event"] == env["event_id"]:
-                        return old, True  # a redelivered opener of an alert resolved since: already applied
-                    # rules.md §4: auto-resolve after window_s of silence, reopen within another window_s
-                    if old and received - old["last_received_at"] < timedelta(seconds=2 * it.window_s):
-                        change = "reopened"
-                        cur.execute(
-                            "UPDATE alerts SET status = 'open', acked_by = NULL, resolved_by = NULL, count = count + 1,"
-                            " severity = %s, last_seen = GREATEST(last_seen, %s),"
-                            " last_received_at = GREATEST(last_received_at, %s), opened_by_event = %s,"
-                            " opened_partition = %s, opened_offset = %s, window_s = %s WHERE id = %s RETURNING *",
-                            (max(old["severity"], env["severity"], key=SEV_RANK.get), env["ts"], received,
-                             env["event_id"], it.partition, it.offset, it.window_s, old["id"]))
-                    else:
-                        change = "opened"
-                        cur.execute(
-                            "INSERT INTO alerts (id, alert_key, rule_id, team_id, status, severity, title, body, fields,"
-                            " color, count, first_seen, last_seen, first_received_at, last_received_at, runbook_id,"
-                            " sample_event, opened_by_event, opened_partition, opened_offset, window_s)"
-                            " VALUES (%s, %s, %s, %s, 'open', %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-                            " RETURNING *",
-                            (str(uuid.uuid4()), m.alert_key, m.rule_id, m.team_id, env["severity"],
-                             _cut(m.title, TITLE_MAX), _cut(m.body, BODY_MAX),
-                             Jsonb({k: _capped_field(v) for k, v in m.fields.items()}), m.color, env["ts"], env["ts"],
-                             received, received, it.runbook_id, Jsonb({**env, "raw": _capped_raw(env["raw"])}),
-                             env["event_id"], it.partition, it.offset, it.window_s))
-                    row = cur.fetchone()
-                    self._change(cur, row, change, received)
-                    if row["count"] in THRESHOLDS:  # a reopen adds 1, so it crosses a threshold only by landing on it
-                        self._change(cur, row, "count_threshold", received)
-                    return row, True
-            except psycopg.errors.UniqueViolation:
-                continue  # another replica opened it first; the next round finds its row
-        raise RuntimeError(f"could not open an alert for {m.alert_key}")
+                        "SELECT * FROM alerts WHERE status = 'resolved' AND id IN (SELECT DISTINCT ON (alert_key) id FROM alerts"
+                        " WHERE alert_key = ANY(%s) AND status = 'resolved' ORDER BY alert_key, last_received_at DESC)"
+                        " ORDER BY id FOR UPDATE", ([it.match.alert_key for it in rest],))
+                    olds = {row["alert_key"]: row for row in cur.fetchall()}
+                    reopens, inserts, at = [], [], {}  # at: alert key -> received_at of its event
+                    for it in rest:
+                        env, m, old = it.envelope, it.match, olds.get(it.match.alert_key)
+                        received = at[m.alert_key] = datetime.fromisoformat(env["received_at"])
+                        if old and old["opened_by_event"] == env["event_id"]:
+                            out[m.alert_key] = old, True  # a redelivered opener of an alert resolved since: already applied
+                        # rules.md §4: auto-resolve after window_s of silence, reopen within another window_s
+                        elif old and received - old["last_received_at"] < timedelta(seconds=2 * it.window_s):
+                            reopens.append((max(old["severity"], env["severity"], key=SEV_RANK.get), env["ts"], received,
+                                            env["event_id"], it.partition, it.offset, it.window_s, old["id"]))
+                        else:
+                            inserts.append((
+                                str(uuid.uuid4()), m.alert_key, m.rule_id, m.team_id, env["severity"],
+                                _cut(m.title, TITLE_MAX), _cut(m.body, BODY_MAX),
+                                Jsonb({k: _capped_field(v) for k, v in m.fields.items()}), m.color, env["ts"], env["ts"],
+                                received, received, it.runbook_id, Jsonb({**env, "raw": _capped_raw(env["raw"])}),
+                                env["event_id"], it.partition, it.offset, it.window_s))
+                    records = []
+
+                    def opened(change, rows):
+                        for row in rows:
+                            records.append(self._record(row, change, at[row["alert_key"]]))
+                            if row["count"] in THRESHOLDS:  # a reopen adds 1, so it crosses a threshold only by landing on it
+                                records.append(self._record(row, "count_threshold", at[row["alert_key"]]))
+                            out[row["alert_key"]] = row, True
+                    # executemany pipelines the statements: one round trip per list, however many alerts; inserts in key order
+                    for change, query, params in (("reopened", _REOPEN, reopens), ("opened", _INSERT, inserts)):
+                        if params:
+                            cur.executemany(query, params, returning=True)
+                            opened(change, [cur.fetchone() for _ in cur.results()])
+                    if records:
+                        cur.executemany("INSERT INTO outbox (topic, key, payload) VALUES (%s, %s, %s)", records)
+                    return [out[k] for k in keys]
+            # another replica opened one of these first, or locked the same rows the other way round; the next round finds its rows
+            except (psycopg.errors.UniqueViolation, psycopg.errors.DeadlockDetected):
+                continue
+        raise RuntimeError(f"could not open alerts for {len(keys)} keys, first {min(keys)}")
+
+    @staticmethod
+    def _record(row: dict, change: str, at: datetime, actor: str = "processor") -> tuple:
+        """Outbox row of a change record (events.md §4); the API builds the timeline from these."""
+        record = {"change_id": str(uuid.uuid4()), "change": change, "at": _iso(at), "actor": actor,
+                  "alert": alert_object(row)}
+        return TOPIC, row["id"], Jsonb(record)
 
     @staticmethod
     def _change(cur, row: dict, change: str, at: datetime, actor: str = "processor") -> None:
-        """Outbox change record (events.md §4); the API builds the timeline from these."""
-        record = {"change_id": str(uuid.uuid4()), "change": change, "at": _iso(at), "actor": actor,
-                  "alert": alert_object(row)}
-        cur.execute("INSERT INTO outbox (topic, key, payload) VALUES (%s, %s, %s)", (TOPIC, row["id"], Jsonb(record)))
+        cur.execute("INSERT INTO outbox (topic, key, payload) VALUES (%s, %s, %s)", Store._record(row, change, at, actor))
 
     # --- flush ---
 

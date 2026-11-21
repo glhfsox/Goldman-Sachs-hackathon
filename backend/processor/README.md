@@ -49,17 +49,22 @@ Ports on the host: Kafka `localhost:9092`, Postgres `localhost:5434` (user/passw
 
 ## Measured (21-11, one Mac, Docker Desktop, mock data from `load.py`)
 
-100,000 events, published flat out unless a rate is given. Only 3 of the 6 `events.raw` partitions get
-traffic, because events are keyed by source and the samples have 3 sources.
+Published flat out unless a rate is given. `load.py` introduces new alert keys at a constant rate over the
+whole run, so the latency is that of steady state, not of a burst of new alerts at the start. Only 3 of the 6
+`events.raw` partitions get traffic, because events are keyed by source and the samples have 3 sources.
 
-| Workers | Duplicates | Rate | Processed events/s | Ingest → alert visible, p50 / p99 |
-|---|---|---|---|---|
-| 1 | 90% | flat out | 12,397 | backlog (publisher is 10× faster) |
-| 6 | 90% | flat out | 16,508 | backlog |
-| 6 | 90% | 10,000/s | 9,015, kept up | 1.1 s / 1.8 s |
-| 1 | 0% (every event a new alert) | flat out | about 2,400 | backlog |
-| 1 | 0%, 30,000 events | 1,000/s | 995, kept up | 0.2 s / 0.4 s |
+| Workers | Events | Duplicates | Rate | Processed events/s | Ingest → alert visible, p50 / p99 |
+|---|---|---|---|---|---|
+| 1 | 100,000 | 90% | flat out | 15,599 | backlog (publisher is 10× faster) |
+| 6 | 100,000 | 90% | flat out | 24,333 | backlog |
+| 1 | 100,000 | 90% | 10,000/s | 9,569, kept up | 94 ms / 530 ms |
+| 6 | 100,000 | 90% | 10,000/s | 9,677, kept up | 125 ms / 1,518 ms |
+| 1 | 50,000 | 0% (every event a new alert) | flat out | 6,618 | backlog |
+| 1 | 30,000 | 0% | 1,000/s | 996, kept up | 103 ms / 352 ms |
 
-Known: a new alert costs one Postgres transaction, so all-distinct traffic is the slow case and its rate
-varied between runs (1,200 to 3,000 events/s with 3 workers); the 1 to 3 s delay at 90% duplicates is not
-explained yet.
+Known: new alerts are opened per Kafka batch in one transaction with a fixed number of round trips, so a
+new alert costs 0.15 ms in all (6,618/s) instead of 0.48 ms; about two thirds of that is Postgres writing the row,
+its three indexes and the outbox row, which is now the limit of all-distinct traffic. The 2 to 4 s delay seen before came from two things, both fixed:
+the relay published at most 500 outbox rows per step, so a burst of `count_threshold` records held up newer
+`opened` records, and `load.py` sent every new key in the first second. With 6 workers at 10,000/s the p99
+is higher than with 1 (not investigated; only 3 workers get traffic and all share the Mac's CPUs).

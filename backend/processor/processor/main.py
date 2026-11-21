@@ -14,7 +14,7 @@ from pathlib import Path
 
 import psycopg
 import redis
-from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, TopicPartition
+from confluent_kafka import OFFSET_BEGINNING, Consumer, KafkaError, KafkaException, Producer, TopicPartition
 
 from .config import Config
 from .core import TS_MAX, TS_MIN, build_envelope, match_rules
@@ -28,6 +28,7 @@ USER_CHANGES, OWN_ACTORS = ("acked", "resolved"), ("processor", "auto")
 MIGRATIONS = Path(__file__).parent.parent / "migrations"
 MIGRATION_LOCK = 0x70726F63  # any constant shared by all replicas
 BATCH = 500
+DRAIN_ROUNDS = 10  # full relay batches per step: a burst of change records drains fast, events still wait at most this many
 FLUSH_S, RESOLVE_S, REFRESH_S, LOG_S = 1.0, 5.0, 2.0, 10.0
 MAX_DEPTH = 64  # payload nesting; Postgres jsonb fails far deeper, json.loads recurses
 _BAD = re.compile("[\x00\ud800-\udfff]")  # NUL (Postgres refuses it) and lone surrogates (UTF-8 cannot encode them)
@@ -181,7 +182,9 @@ class Processor:
                 self.store.apply_changes(records)
             if offsets := {(m.topic(), m.partition()): m.offset() + 1 for m in msgs if not m.error()}:
                 _commit(self.changes_consumer, offsets)  # after apply: a crash before this line means redelivery
-        self.relay.drain()  # after the flush, auto-resolve and resolves, so their changes leave in this step too
+        for _ in range(DRAIN_ROUNDS):  # after the flush, auto-resolve and resolves, so their changes leave in this step too
+            if self.relay.drain(BATCH) < BATCH:
+                break
         if msgs := self.config_consumer.consume(num_messages=BATCH, timeout=0):
             if records := [d for m in msgs if (d := _decode(m))]:
                 self.config.apply(records)
@@ -251,25 +254,41 @@ def _supervise(n: int, args: tuple) -> None:
     sys.exit(0 if stop and codes == [0] * n else 1)
 
 
+def _rewind_if_wiped(pg):
+    """on_assign for `config.changes`: with no mappings and no rules the database was wiped (or is new), so replay the
+    topic from the start; the committed offset would skip what the copy lost. Upserts are idempotent by updated_at."""
+    # shortcut: a crash between the first replayed batch's apply and its commit leaves the tables partly filled and the offset at the end; wipe again to retry
+    def on_assign(consumer, partitions):
+        if not pg.execute("SELECT EXISTS (SELECT 1 FROM mappings) OR EXISTS (SELECT 1 FROM rules)").fetchone()[0]:
+            log.info("no mappings and no rules: reading %s from the beginning", CONFIG_TOPIC)
+            for p in partitions:
+                p.offset = OFFSET_BEGINNING
+        consumer.assign(partitions)
+    return on_assign
+
+
 def _run(brokers: str, db_url: str, redis_url: str) -> None:
     """One replica's loop until SIGTERM or SIGINT."""
     r = redis.Redis.from_url(redis_url, decode_responses=True)
     consumer = Consumer({"bootstrap.servers": brokers, "group.id": "processor",
                          "enable.auto.commit": False, "auto.offset.reset": "earliest"})
     consumer.subscribe([RAW_TOPIC])
+    config_pg = psycopg.connect(db_url, autocommit=True)
     # one group shared by all replicas: every record reaches the shared tables once, a fresh group replays the topic
     config_consumer = Consumer({"bootstrap.servers": brokers, "group.id": "processor-config",
                                 "enable.auto.commit": False, "auto.offset.reset": "earliest"})
-    config_consumer.subscribe([CONFIG_TOPIC])
-    # the same for people's acks and resolves: each record is applied by one replica
+    # config.changes has one partition, so one replica refills the tables and the others read them on refresh
+    config_consumer.subscribe([CONFIG_TOPIC], on_assign=_rewind_if_wiped(config_pg))
+    # the same for people's acks and resolves: each record is applied by one replica; a new group starts at the end,
+    # an ack older than the group concerns an alert long since changed, and replaying the topic delayed fresh acks by minutes
     changes_consumer = Consumer({"bootstrap.servers": brokers, "group.id": "processor-changes",
-                                 "enable.auto.commit": False, "auto.offset.reset": "earliest"})
+                                 "enable.auto.commit": False, "auto.offset.reset": "latest"})
     changes_consumer.subscribe([CHANGES_TOPIC])
     # Relay needs per-key order on retries, and a final callback for every message within its flush
     producer = Producer({"bootstrap.servers": brokers, "enable.idempotence": True, "message.timeout.ms": MESSAGE_TIMEOUT_MS})
     store = Store(psycopg.connect(db_url, autocommit=True), r)
     relay = Relay(psycopg.connect(db_url, autocommit=True), producer, r)
-    proc = Processor(consumer, config_consumer, changes_consumer, Config(psycopg.connect(db_url, autocommit=True)), store, relay)
+    proc = Processor(consumer, config_consumer, changes_consumer, Config(config_pg), store, relay)
 
     stop = []
     for s in (signal.SIGTERM, signal.SIGINT):

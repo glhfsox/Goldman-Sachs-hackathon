@@ -210,6 +210,28 @@ def test_two_keys_are_two_alerts(new_store, batch, sql):
     assert len(changes(sql, "opened")) == 2
 
 
+def test_one_batch_opens_and_reopens_many_keys_in_one_open_call(new_store, new_redis, batch, sql):
+    store = new_store()
+    store.process(batch("workflow", range(9)))
+    store.flush()
+    resolve_all(sql)
+    new_redis().flushall()
+    calls, orig = [], store._open
+    store._open = lambda items: calls.append(len(items)) or orig(items)
+    instruments = [f"I{n:02}" for n in range(50)]
+    store.process(batch("workflow", [9], at=10) + [it for n, i in enumerate(instruments)
+                                                   for it in batch("pricing", [2 * n, 2 * n + 1], instrument=i)])
+    store.flush()
+    assert calls == [51]
+    assert sql("SELECT title, count FROM alerts WHERE rule_id = 'pricing-engine-errors' ORDER BY title") == [
+        {"title": f"Pricing errors on {i}", "count": 2} for i in instruments]
+    assert sorted(c["alert"]["title"] for c in changes(sql, "opened")[1:]) == [f"Pricing errors on {i}" for i in instruments]
+    [reopened], [threshold] = changes(sql, "reopened"), changes(sql, "count_threshold")
+    assert reopened["alert"]["id"] == threshold["alert"]["id"] and threshold["alert"]["count"] == 10
+    assert reopened["at"] == "2026-11-20T10:15:12.123Z"
+    assert sql("SELECT status, count FROM alerts WHERE rule_id = 'settlements-workflow-failed'") == [{"status": "open", "count": 10}]
+
+
 def test_unmapped_schemas_are_sampled_once(new_store, mappings, sql):
     def env(n, payload):
         return build_envelope(make_event("vendor-x", payload, n), mappings)
@@ -239,8 +261,8 @@ def crash_after_open(store):
     """The replica dies after `_open` commits to Postgres, before it seeds Redis."""
     orig = store._open
 
-    def crash(it):
-        orig(it)
+    def crash(items):
+        orig(items)
         raise Crash
     store._open = crash
 
@@ -281,8 +303,8 @@ def test_stale_hash_after_reopen_race_does_not_block_other_keys(new_store, new_r
     r.delete(store_hash(key))
     orig = store._open
 
-    def other_replica_seeds_first(it):
-        out = orig(it)
+    def other_replica_seeds_first(items):
+        out = orig(items)
         r.hset(store_hash(key), mapping=stale)  # seeded from the old row a moment before this one
         return out
     store._open = other_replica_seeds_first
