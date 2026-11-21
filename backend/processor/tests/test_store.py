@@ -154,6 +154,20 @@ def test_two_replicas_race_on_many_overlapping_new_keys(new_store, batch, sql):
     assert len(changes(sql, "opened")) == 220 and changes(sql, "reopened") == []
 
 
+def test_six_replicas_open_shifted_overlapping_new_keys_without_giving_up_or_losing_counts(new_store, batch, sql):
+    # issue #59: each open round can lose to a different replica; two events per key per batch catch a dropped miss
+    def work(store, p):
+        for rnd in range(5):
+            ns = list(range(rnd * 200 + p * 10, rnd * 200 + p * 10 + 60))
+            store.process(pricing(ns, rnd * 1000, partition=p)(batch) + pricing(ns, rnd * 1000 + 500, partition=p)(batch))
+
+    stores = [new_store() for _ in range(6)]
+    assert race(stores, work) == []
+    stores[0].flush()
+    assert sql("SELECT count(*) AS n, count(DISTINCT alert_key) AS k, sum(count) AS events FROM alerts") == [
+        {"n": 550, "k": 550, "events": 6 * 5 * 60 * 2}]
+
+
 def test_two_replicas_race_to_reopen_many_keys(new_store, new_redis, batch, sql):
     s0 = new_store()
     s0.process(pricing(range(60), 0)(batch))

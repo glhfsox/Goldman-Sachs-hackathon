@@ -117,7 +117,7 @@ def main() -> None:
                  "received_at": datetime.now(UTC).isoformat(timespec="milliseconds")[:-6] + "Z", "payload": payload}
         while True:
             try:
-                prod.produce(RAW, key=source, value=json.dumps(event), on_delivery=delivered)
+                prod.produce(RAW, key=event["event_id"], value=json.dumps(event), on_delivery=delivered)
                 break
             except BufferError:
                 prod.poll(0.05)
