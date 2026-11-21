@@ -14,10 +14,10 @@
 {"id":"processor_db","kind":"store","area":"infra","purpose":"Processor's own Postgres: alerts, incidents, outbox, parked unmapped events, and its copies of mappings, rules and the service map"}
 {"id":"notifier_db","kind":"store","area":"infra","purpose":"Notifier's own Postgres: notification outbox and its copies of alerts, rules, teams, on-call, preferences, runbooks"}
 {"id":"api_db","kind":"store","area":"infra","purpose":"API's own Postgres: all configuration, runbooks, timeline, action runs, proposals, and a read copy of alerts"}
-{"id":"ai_worker_db","kind":"store","area":"infra","purpose":"AI worker's own Postgres: its job queue (schema samples and runbook drafts to process)"}
+{"id":"ai_worker_db","kind":"store","area":"infra","purpose":"AI worker's own Postgres: its job queue (schema samples, runbook drafts and resolved alerts to process)"}
 {"id":"api","kind":"service","area":"backend","purpose":"REST and WebSocket for the UI: owns configuration, ack and resolve, timeline, runbook lookup, action runner with approval"}
 {"id":"web_ui","kind":"ui","area":"frontend","purpose":"Live alert feed, alert card with runbook and timeline, rule editor, channel preferences"}
-{"id":"ai_worker","kind":"service","area":"backend","purpose":"Off the event path: proposes mappings for new schemas and converts runbooks to the canonical form"}
+{"id":"ai_worker","kind":"service","area":"backend","purpose":"Off the event path: an LLM agent that writes mappings for new schemas, converts runbooks, and proposes a runbook from a resolved alert's timeline"}
 {"id":"claude_api","kind":"external","purpose":"LLM API called by the AI worker only, never per event"}
 
 {"from":"sources","to":"ingest","data":"HTTP webhooks"}
@@ -38,7 +38,9 @@
 {"from":"config_changes","to":"ingest","data":"sources"}
 {"from":"config_changes","to":"processor","data":"mappings, rules, service map"}
 {"from":"config_changes","to":"notifier","data":"rules, teams, on-call, preferences, runbooks"}
-{"from":"config_changes","to":"ai_worker","data":"runbook drafts"}
+{"from":"config_changes","to":"ai_worker","data":"runbook drafts, mappings"}
+{"from":"alerts_changes","to":"ai_worker","data":"resolved"}
+{"from":"api","to":"ai_worker","data":"alert timeline (REST)"}
 {"from":"notifier","to":"notifier_db","data":"notifications, config and alert copies"}
 {"from":"notifier","to":"channels","data":"rendered message"}
 {"from":"notifier","to":"alerts_timeline","data":"notification status"}
@@ -51,4 +53,4 @@
 {"from":"web_ui","to":"api","data":"user actions"}
 {"from":"ai_worker","to":"ai_worker_db","data":"jobs"}
 {"from":"ai_worker","to":"api","data":"mappings, canonical runbooks, proposals (REST)"}
-{"from":"ai_worker","to":"claude_api","data":"sample payload, runbook text"}
+{"from":"ai_worker","to":"claude_api","data":"sample payload, runbook text, alert timeline"}

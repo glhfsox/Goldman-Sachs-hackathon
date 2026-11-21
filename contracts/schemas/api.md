@@ -11,7 +11,7 @@ Every insert, update or soft-delete below is published to Kafka `config.changes`
 | Table | Columns | Published as kind |
 |---|---|---|
 | `sources` | `id` text primary key, `kind` text (`http` \| `kafka`), `config` jsonb, `enabled` boolean, `updated_at` timestamptz | `source` |
-| `mappings` | `id` text primary key, `status` text (`active` \| `disabled`), `origin` text (`seed` \| `llm` \| `user`), `priority` int, `body` jsonb ([../rules.md](../rules.md) §3), `updated_at` timestamptz | `mapping` |
+| `mappings` | `id` text primary key, `status` text (`active` \| `disabled`), `origin` text (`seed` \| `human` \| `llm`), `priority` int, `body` jsonb ([../rules.md](../rules.md) §3), `updated_at` timestamptz | `mapping` |
 | `rules` | `id` text primary key, `team_id` text, `enabled` boolean, `body` jsonb ([../rules.md](../rules.md) §4), `updated_at` timestamptz | `rule` |
 | `teams` | `id` text primary key, `name` text | `team` |
 | `users` | `id` text primary key, `name` text, `email` text, `phone` text | `user` |
@@ -34,7 +34,7 @@ Every insert, update or soft-delete below is published to Kafka `config.changes`
 | `at` | timestamptz, not null | |
 | `actor` | text, not null | A user id, a service name, or `auto` |
 | `kind` | text, not null | `opened`, `severity_raised`, `reopened`, `acked`, `resolved`, `notification_sent`, `notification_failed`, `notification_suppressed`, `action_requested`, `action_approved`, `action_rejected`, `action_finished`, `proposal_created`, `proposal_decided` |
-| `data` | jsonb, not null | |
+| `data` | jsonb, not null | For the `action_*` kinds: `{"action_run": {id, runbook_id, step_index, action, params, status, result}}` |
 
 Rows come from three places: `alerts.changes` (alert state), `alerts.timeline` (notifications), and the
 api's own actions (action runs, proposals). After storing a row the api publishes a `timeline` message
@@ -90,8 +90,7 @@ Example row:
 |---|---|---|
 | `alerts` | `id` text primary key, then every field of the [Alert object](../api.md) as a column (`fields` and `sample_event` jsonb) | Kafka `alerts.changes` (insert or replace); `count` and `last_seen` also from Redis `ui.alerts` `count` messages |
 | `notifications` | `id` text primary key, `alert_id` text, `user_id` text, `channel` text, `status` text, `reason` text, `send_at` timestamptz, `sent_at` timestamptz, `error` text | Kafka `alerts.timeline`, the `notification` object in `data` |
-| `schema_samples` | `fingerprint` text primary key, `source_id` text, `sample` jsonb, `status` text (`pending` \| `mapped` \| `failed`), `created_at` timestamptz | Kafka `schema.samples` (insert as `pending`); `mapped` when a mapping created for that fingerprint is saved |
+| `schema_samples` | `fingerprint` text primary key, `source_id` text, `sample` jsonb, `status` text (`pending` \| `mapped` \| `failed`), `created_at` timestamptz | Kafka `schema.samples` (insert as `pending`); `mapped` when a mapping is saved with `PUT /mappings/{id}?fingerprint=`; `failed` through `PUT /schema-samples/{fingerprint}` ([../api.md](../api.md)) |
 
 The api's `alerts` is a copy: the processor's table is the truth. An ack or resolve is published to
 `alerts.changes` and takes effect in every copy, this one included, when that record is consumed.
-How a failed mapping attempt reaches `schema_samples.status` is not specified yet.

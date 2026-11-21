@@ -111,7 +111,8 @@ same transaction ([storage.md](storage.md)), then Kafka, then Redis `ui.alerts`.
 Consumers: the notifier (policy and delivery; on `acked` it cancels every notification of that alert
 that is still pending), the api (its read copy of alerts and the timeline) and the processor, which owns
 alert state and applies the `acked` and `resolved` records the api published. Every consumer ignores
-changes it published itself and applies the rest idempotently by `change_id`.
+changes it published itself and applies the rest idempotently by `change_id`. The ai-worker reads only
+`resolved` records, to draft a runbook from what people did on that alert ([runbooks.md](runbooks.md)).
 
 ### What the notifier gets from the processor
 
@@ -175,14 +176,14 @@ the row they hold.
 | `kind` | `id` | `body` | Copied by |
 |---|---|---|---|
 | `source` | source id | `{id, kind, config, enabled}` | ingest |
-| `mapping` | mapping id | Mapping ([rules.md](rules.md) §3) | processor |
+| `mapping` | mapping id | Mapping ([rules.md](rules.md) §3) | processor; ai-worker (in memory, to check a new mapping against the existing ones) |
 | `rule` | rule id | Rule ([rules.md](rules.md) §4) | processor, notifier |
 | `service_dep` | `<service>:<depends_on>` | `{service, depends_on}` | processor |
 | `team` | team id | `{id, name}` | notifier |
 | `user` | user id | `{id, name, email, phone}` | notifier |
 | `membership` | `<team_id>:<user_id>` | `{team_id, user_id, on_call}` | notifier |
 | `preferences` | user id | Preferences ([rules.md](rules.md) §5) | notifier |
-| `runbook` | runbook id | `{id, team_id, title, format, source, canonical, status, version}` | notifier (`active`), ai-worker (`draft`, to convert) |
+| `runbook` | runbook id | `{id, team_id, title, format, source, canonical, status, version}` | notifier (`active`), ai-worker (`draft` with no `canonical`, to convert) |
 
 `deleted: true` (with `body: null`) is used only for rows that really disappear (`membership`,
 `service_dep`); everything else is disabled through its `enabled` or `status` field.

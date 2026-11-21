@@ -15,7 +15,7 @@ The stack of each service is its owners' choice; the interfaces here are JSON sh
 | processor (owner: glhfsox) | `backend/processor/` | none | Kafka `events.raw`, `config.changes` (mappings, rules, service map), `alerts.changes` (acked, resolved) | Kafka `alerts.changes`, `schema.samples`; Redis `ui.alerts` |
 | notifier | `backend/notifier/` | none | Kafka `alerts.changes`, `config.changes` (rules, teams, users, memberships, preferences, runbooks) | Channel adapters; Kafka `alerts.timeline` |
 | api | `backend/api/` | 8000 (HTTP + WebSocket) | Kafka `alerts.changes`, `alerts.timeline`, `schema.samples`; Redis `ui.alerts` | Kafka `config.changes`, `alerts.changes` (acked, resolved); REST and WebSocket |
-| ai-worker (owners: glhfsox, spdsslg) | `backend/ai-worker/` | none | Kafka `schema.samples`, `config.changes` (runbook drafts); Claude API | REST calls to the api: mappings, canonical runbooks, proposals |
+| ai-worker (owners: glhfsox, spdsslg) | `backend/ai-worker/` | none | Kafka `schema.samples`, `config.changes` (runbook drafts, mappings), `alerts.changes` (resolved); the api's `GET /alerts/{id}`; Claude API | REST calls to the api: mappings, canonical runbooks, proposals |
 | UI | `frontend/` | 3000 | API on 8000 | none |
 
 Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](storage.md),
@@ -39,8 +39,8 @@ Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](st
 |---|---|---|---|---|
 | `source.*` (e.g. `source.workflows`, `source.trades`) | `kafka-sources` | any | third-party systems, demo scripts | ingest (`ingest`) |
 | `events.raw` | `kafka` | `source_id` | ingest | processor (`processor`) |
-| `alerts.changes` | `kafka` | `alert_id` | processor, api | notifier (`notifier`), api (`api`), processor (`processor`) |
-| `config.changes` (compacted) | `kafka` | `<kind>:<id>` | api | ingest, processor, notifier, ai-worker (one group each) |
+| `alerts.changes` | `kafka` | `alert_id` | processor, api | notifier (`notifier`), api (`api`), processor (`processor-changes`), ai-worker (`ai-worker`) |
+| `config.changes` (compacted) | `kafka` | `<kind>:<id>` | api | ingest, processor, notifier (one group each); ai-worker (no group: it reads the topic from the beginning at every start) |
 | `alerts.timeline` | `kafka` | `alert_id` | notifier | api (`api`) |
 | `schema.samples` | `kafka` | `fingerprint` | processor | ai-worker (`ai-worker`), api (`api`) |
 
@@ -58,7 +58,7 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 | `LOG_THROTTLE_SECONDS` | ingest | A repeating failure (Kafka unreachable, database error) is logged at most once per this many seconds per error kind, with the count of hidden lines; default `10`, `0` logs every time |
 | `ENABLE_SWAGGER` | ingest | `true` turns on the OpenAPI spec (`/openapi/v1.json`) and Swagger UI (`/swagger`); also on in Development, off by default |
 | `DATABASE_URL` | all backend services, each its own value | `postgres://alerts:alerts@processor-db:5432/processor` (hosts and database names: [storage.md](storage.md)) |
-| `API_URL` | ai-worker | `http://api:8000` |
+| `API_URL` | ai-worker | `http://api:8000/api` (the REST base of [api.md](api.md), `/api` included) |
 | `REDIS_URL` | processor, notifier, api | `redis://redis:6379/0` |
 | `PROCESSOR_WORKERS` | processor | `1` (default). Worker processes inside one container; each is a full replica with its own Kafka consumer in group `processor` |
 | `SMTP_HOST`, `SMTP_PORT` | notifier | `mailhog`, `1025` |
@@ -66,5 +66,6 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 | `PUBLIC_BASE_URL` | notifier, api | `http://localhost:3000` (short alert link: `{PUBLIC_BASE_URL}/a/{alert_id}`) |
 | `VITE_API_URL` (or the frontend stack's equivalent) | frontend | `http://localhost:8000` |
 | `ANTHROPIC_API_KEY` | ai-worker only | optional: without it the system runs on seeded mappings and new schemas stay unmapped |
+| `ANTHROPIC_MODEL` | ai-worker only | optional, default `claude-opus-5-5` |
 
 No auth in the PoC. The UI has a user picker and sends the chosen user as the `X-User` header.
