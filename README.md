@@ -117,21 +117,24 @@ Any JSON works. An unknown shape appears in the UI as unmapped and gets a mappin
 Two runs on 21-11 (one Mac, Apple Silicon, every service in Docker Desktop, so all clocks are the same clock).
 Background load from the sources simulator for 120 s (90% Kafka, 10% HTTP), plus 100 probe events over HTTP, each
 opening its own alert routed to UI, email and SMS. Full reports:
-[3,000 msg/s](docs/evaluation/20261121065848.md), [9,000 msg/s](docs/evaluation/20261121070611.md).
+[3,000 msg/s](docs/evaluation/20261121065848.md), [9,000 msg/s](docs/evaluation/20261121070611.md),
+[9,000 msg/s with 3 processors and 3 notifiers](docs/evaluation/20261121071509.md) (`docker compose up -d --scale processor=3 --scale notifier=3`).
 
-| Metric | 3,000 msg/s asked | 9,000 msg/s asked |
-|---|---|---|
-| Sent by the simulator / failed | 354,780 / 0 | 1,011,682 / 0 (3 processes, about 8,200 msg/s: the generator on the same machine is the limit) |
-| Ingested (`events.raw`), sustained | 2,955 events/s | 7,991 events/s |
-| Processed (rules, dedup, alert state), sustained | 2,955 events/s | 7,991 events/s |
-| Processor lag at the end of the load / time to drain | 27 events / 1.0 s | 0 events / 0.5 s |
-| Probes lost | 0 of 100 | 0 of 100 |
-| Ingest → alert visible in the UI (WebSocket), p50 / p95 / p99 | 82 / 133 / 150 ms | 93 / 296 / 463 ms |
-| Ingest → email sent (MailHog), p50 / p95 / p99 | 84 / 138 / 159 ms | 96 / 298 / 466 ms |
-| Ingest → SMS sent (mock gateway), p50 / p95 / p99 | 87 / 135 / 154 ms | 96 / 298 / 464 ms |
+| Metric | 3,000 msg/s asked | 9,000 msg/s asked | 9,000 msg/s asked, 3 processors + 3 notifiers |
+|---|---|---|---|
+| Sent by the simulator / failed | 354,780 / 0 | 1,011,682 / 0 (3 processes, about 8,200 msg/s: the generator on the same machine is the limit) | 897,276 / 0 (about 6,850 msg/s: the extra containers took CPU from the generator) |
+| Ingested (`events.raw`), sustained | 2,955 events/s | 7,991 events/s | 6,426 events/s |
+| Processed (rules, dedup, alert state), sustained | 2,955 events/s | 7,991 events/s | 6,426 events/s |
+| Processor lag at the end of the load / time to drain | 27 events / 1.0 s | 0 events / 0.5 s | 0 events / 0.7 s |
+| Probes lost | 0 of 100 | 0 of 100 | 0 of 100 |
+| Ingest → alert visible in the UI (WebSocket), p50 / p95 / p99 | 82 / 133 / 150 ms | 93 / 296 / 463 ms | 94 / 217 / 249 ms |
+| Ingest → email sent (MailHog), p50 / p95 / p99 | 84 / 138 / 159 ms | 96 / 298 / 466 ms | 99 / 236 / 293 ms |
+| Ingest → SMS sent (mock gateway), p50 / p95 / p99 | 87 / 135 / 154 ms | 96 / 298 / 464 ms | 101 / 230 / 257 ms |
 
-The processor kept up with everything that was sent in both runs (no lag left), so the ceiling is above 8,000
-events/s on this machine; a second load machine is needed to find it. Background events deduplicate into alerts that
+The processor kept up with everything that was sent in every run (no lag left), so the ceiling is above 8,000
+events/s on this machine; a second load machine is needed to find it. Three processor replicas (two of the six
+`events.raw` partitions each) and three notifiers cut the tail: ingest → UI p99 from 463 to 249 ms. Ingest stays one
+instance: it is bound to host port 8001. Background events deduplicate into alerts that
 are already open, so they open no new alerts.
 
 The judges of the AI worker (TypeSafe Jev), on labelled cases (labels written with AI help, not yet reviewed):
