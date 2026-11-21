@@ -1,0 +1,14 @@
+# The web UI built and served by nginx on http://localhost:3000, forwarding /api and /ws to the api.
+# Included by the root docker-compose.yml, where the api is the `api` service (the default upstream).
+# Alone, against an api running on this machine:
+#   API_UPSTREAM=host.docker.internal:8000 docker compose up -d --build
+services:
+  frontend:
+    build: .
+    environment:
+      API_UPSTREAM: ${API_UPSTREAM:-api:8000}
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

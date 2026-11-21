@@ -16,3 +16,5 @@ include:
       - backend/ai-worker/docker-compose.yml
       - backend/stack/ai-worker.override.yml
   - path: backend/stack/docker-compose.yml
+  # The web UI on http://localhost:3000 (nginx, forwards /api and /ws to the api).
+  - path: frontend/docker-compose.yml
