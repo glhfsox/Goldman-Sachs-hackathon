@@ -68,6 +68,26 @@ public sealed class RuleAndMappingEndpointTests : IClassFixture<PostgresFixture>
     }
 
     [Fact]
+    public async Task Rule_WithSeverity_IsStoredAndPublished_NullIsAccepted_AnythingElseIs422()
+    {
+        using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
+        using var client = factory.CreateClient();
+
+        var created = await client.PostAsync("/api/rules", Json(Rule.Replace("\"team_id\"", "\"severity\": \"critical\", \"team_id\"")));
+        var cleared = await client.PutAsync("/api/rules/rates-large", Json(Rule.Replace("\"team_id\"", "\"severity\": null, \"team_id\"")));
+        var wrong = await client.PutAsync("/api/rules/rates-large", Json(Rule.Replace("\"team_id\"", "\"severity\": \"urgent\", \"team_id\"")));
+        var number = await client.PutAsync("/api/rules/rates-large", Json(Rule.Replace("\"team_id\"", "\"severity\": 3, \"team_id\"")));
+        var body = await wrong.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal("critical", (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("severity").GetString());
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, wrong.StatusCode);
+        Assert.Equal("severity", body.GetProperty("details")[0].GetProperty("path").GetString());
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, number.StatusCode);
+    }
+
+    [Fact]
     public async Task Rule_DuplicateAndUnknownAndMismatchedId_AreRejected()
     {
         using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);

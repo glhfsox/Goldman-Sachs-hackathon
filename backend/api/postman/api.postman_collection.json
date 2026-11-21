@@ -532,6 +532,95 @@
           ]
         },
         {
+          "name": "Fix the severity of the rule's alerts",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/rules/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rules",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{ruleId}}\",\n  \"team_id\": \"rates\",\n  \"when\": {\n    \"all\": [\n      {\n        \"field\": \"type\",\n        \"op\": \"glob\",\n        \"value\": \"trade.rejected*\"\n      }\n    ]\n  },\n  \"route\": {\n    \"recipients\": [\n      {\n        \"team\": \"rates\"\n      }\n    ],\n    \"channels\": [\n      \"ui\"\n    ]\n  },\n  \"severity\": \"critical\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"severity kept\", () => pm.expect(pm.response.json().severity).to.eql(\"critical\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown severity: 422",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/rules/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rules",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{ruleId}}\",\n  \"team_id\": \"rates\",\n  \"when\": {\n    \"all\": [\n      {\n        \"field\": \"type\",\n        \"op\": \"glob\",\n        \"value\": \"trade.rejected*\"\n      }\n    ]\n  },\n  \"route\": {\n    \"recipients\": [\n      {\n        \"team\": \"rates\"\n      }\n    ],\n    \"channels\": [\n      \"ui\"\n    ]\n  },\n  \"severity\": \"urgent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is invalid_rule\", () => pm.expect(pm.response.json().error).to.eql(\"invalid_rule\"));",
+                  "pm.test(\"details name severity\", () => pm.expect(pm.response.json().details[0].path).to.eql(\"severity\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Body id differs from URL id: 422",
           "request": {
             "method": "PUT",
