@@ -5,17 +5,22 @@
 ![lost](https://img.shields.io/badge/events_lost-0-2ea44f)
 ![llm](https://img.shields.io/badge/LLM_calls_per_event-0-8250df)
 
+> [!NOTE]
+> All numbers are from one Mac (Docker Desktop), with the load generator on the same machine, so throughput is capped
+> by the generator, not the pipeline (no lag left in any run). Latency drops as instances are added: at the same
+> 9k msg/s target, ingest → UI p99 fell from 463 ms to 249 ms with 3 processors and 3 notifiers. See [Measured](#measured).
+
 Errors, metric alerts and business events from any system, in any format, become **one alert** for the people who
 own the problem, on **the channel each of them prefers**, with **the team's runbook** filled in and runnable.
 
 | | |
 |---|---|
-| 🔌 **Any source, any schema** | Kafka and HTTP. A never-seen schema shows up at once; Claude writes its mapping in the background and the waiting events replay. |
-| 🎯 **Rules per team** | Any field, payload values included (`notional > 10000000`), AND/OR. Routing, channels and look per rule. Changed live. |
-| 🔇 **No floods** | 500 identical errors a minute = one alert with a counter. Grouping per rule window. |
-| 📨 **Delivery that survives** | UI, email, SMS, call. Personal preferences, quiet hours, escalation, digests. Retries, backoff, fallback channel. |
-| 🛠 **Runbooks you can run** | YAML, Markdown, a link or free text → steps with actions (retry, restart, webhook, escalate). Risky steps wait for a person. |
-| ⚖️ **AI that only proposes** | Jev judges check every automatic run and propose severities and start modes from how people reacted; a person accepts. |
+| **Any source, any schema** | Kafka and HTTP. A never-seen schema shows up at once; Claude writes its mapping in the background and the waiting events replay. |
+| **Rules per team** | Any field, payload values included (`notional > 10000000`), AND/OR. Routing, channels and look per rule. Changed live. |
+| **No floods** | 500 identical errors a minute = one alert with a counter. Grouping per rule window. |
+| **Delivery that survives** | UI, email, SMS, call. Personal preferences, quiet hours, escalation, digests. Retries, backoff, fallback channel. |
+| **Runbooks you can run** | YAML, Markdown, a link or free text → steps with actions (retry, restart, webhook, escalate). Risky steps wait for a person. |
+| **AI that only proposes** | Jev judges check every automatic run and propose severities and start modes from how people reacted; a person accepts. |
 
 ## Architecture
 
