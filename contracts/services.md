@@ -70,5 +70,6 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 | `TYPESAFE_API_KEY` | ai-worker only | optional: without it the ai-worker makes no `rule_severity` or `runbook_start` proposal and posts no run risk check (it does not poll `GET /runs`; those jobs stay pending) |
 | `TYPESAFE_BASE_URL` | ai-worker only | optional, default `https://api.typesafe.ai` (a local stand-in for tests) |
 | `TYPESAFE_MODEL` | ai-worker only | optional, default `jev-latest` |
+| `AGENT_METRICS_FILE` | ai-worker only | optional, default `logs/agent-metrics.jsonl` (one JSON line per job attempt: tokens, cost, tool calls, retries; docker compose mounts `backend/ai-worker/logs`) |
 
 No auth in the PoC. The UI has a user picker and sends the chosen user as the `X-User` header.

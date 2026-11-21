@@ -18,12 +18,13 @@ over REST ([../api.md](../api.md)).
 | `kind` | text, not null | `mapping` (from Kafka `schema.samples`), `runbook` (from `config.changes`, kind `runbook`, status `draft`, no `canonical` yet), `proposal` (from `alerts.changes`, change `resolved`) or `severity` (from `alerts.changes`: an `opened` change for a rule with no resolved alert in `alert_history` yet, or a `resolved` change once the rule has 20 or more resolved alerts: one job per 20, so repeats and the 21st to 39th resolves add nothing), `run_risk` (from the api's `GET /runs?risk_check=pending`) or `run_start` (when `run_history` gets new runs of a pair that has 10 or more) |
 | `input` | jsonb, not null | `{fingerprint, source_id, sample}`, the runbook record's body, `{alert_id}`, or `{rule_id, alert_id, mode: "first" \| "history", example}` (`example`: title, body, fields and the sample event's type, service, env, severity, from the triggering record; null when that record had only `alert.id`), the `RunbookRun` as the api returned it, or `{rule_id, runbook_id}` |
 | `status` | text, not null | `pending`, `done`, `failed` |
-| `attempts` | int, not null | A job that keeps failing for a temporary reason becomes `failed` at 3 |
+| `attempts` | int, not null | A job that keeps failing for a temporary reason becomes `failed` at 6 |
+| `run_after` | timestamptz | Set when a failed attempt sends the job back to `pending`: it is not claimed before then (10 s doubling to at most 300 s, with jitter; 2 s for `run_risk`). Null otherwise (migration `004_job_backoff.sql`) |
 | `result` | jsonb | What was sent to the api |
 | `error` | text | |
 | `created_at`, `finished_at` | timestamptz | |
 
-Workers claim rows with `FOR UPDATE SKIP LOCKED` where `status = 'pending'` and the kind is one whose
+Workers claim rows with `FOR UPDATE SKIP LOCKED` where `status = 'pending'`, `run_after` is null or past, and the kind is one whose
 API key is set (`ANTHROPIC_API_KEY`: mapping, runbook, proposal; `TYPESAFE_API_KEY`: severity, run_risk,
 run_start), `run_risk` first (it is useless after the run's `start_at`), and hold
 the row lock for the whole job, so a worker that dies releases its job; there is no stored `running` state.
@@ -45,8 +46,8 @@ job, `thread_id` = `jobs.id`. Created and migrated by `langgraph-checkpoint-post
 its own versions in `checkpoint_migrations`), which the worker runs at start under the same advisory lock as
 `migrations/`; their columns are that library's (`langgraph-checkpoint-postgres` 3.2.1:
 thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint jsonb, metadata jsonb; blobs and writes as
-bytea). A job that resumes reads its thread; the rows of a job are normally deleted when the job ends `done` or
-`failed` (a crash between the two leaves a few rows that nothing reads). Nothing else reads them.
+bytea). A job that resumes reads its thread; the rows of a job are deleted in the same transaction that sets the job
+`done` or `failed`, so none are left behind. Nothing else reads them.
 
 ### `alert_history`
 

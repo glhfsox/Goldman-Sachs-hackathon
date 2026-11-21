@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import anthropic
 import psycopg
 from confluent_kafka import OFFSET_BEGINNING, Consumer, KafkaException, TopicPartition
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -30,7 +31,9 @@ SAMPLES_TOPIC, CONFIG_TOPIC, CHANGES_TOPIC = "schema.samples", "config.changes",
 MIGRATIONS = Path(__file__).parent.parent / "migrations"
 MIGRATION_LOCK = 0x61697772  # any constant shared by all replicas
 BATCH = 100
-IDLE_S, RETRY_S = 1.0, 5.0  # poll wait with no job to run, and after a retryable failure
+IDLE_S = 1.0  # poll wait with no job to run (a failed job's own backoff is `jobs.run_after`)
+DOWN_S = 5.0  # wait after a database or Kafka error before the loop goes on (reconnecting to the database)
+DB_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)  # our own database: reconnect, never fail the job
 MAX_POLL_INTERVAL_MS = 1_800_000  # a job (up to 6 model calls) runs between polls; a rebalance past it only redelivers
 
 HANDLERS = {"mapping": mapping.handle, "runbook": runbooks.convert, "proposal": runbooks.propose,
@@ -40,6 +43,49 @@ KEYS = {"mapping": "ANTHROPIC_API_KEY", "runbook": "ANTHROPIC_API_KEY", "proposa
         "run_start": "TYPESAFE_API_KEY"}  # a kind runs only when its key is set
 PENDING_S, FINISHED_S = 2.0, 30.0  # how often the api's runs are polled
 PENDING_DOWN_S, RUNS_DOWN_S = 5.0, 30.0  # the wait after a failed pending poll; after a 404 or a failed finished poll
+
+
+def _permanent(e: Exception) -> bool:
+    """Retrying changes nothing: JobFailed (a refusal, a rejected submission, a Jev 4xx), an api 4xx, or an Anthropic
+    4xx other than 408, 409 and 429. Everything else (5xx, 529, timeouts, connection errors, junk answers) retries."""
+    return isinstance(e, (JobFailed, ApiError)) or (isinstance(e, anthropic.APIStatusError)
+                                                     and 400 <= e.status_code < 500 and e.status_code not in (408, 409, 429))
+
+
+def write_metrics(line: dict) -> None:
+    """Append one JSON line to AGENT_METRICS_FILE; a failure is logged and never breaks the job."""
+    try:
+        path = Path(os.environ.get("AGENT_METRICS_FILE") or "logs/agent-metrics.jsonl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as f:
+            f.write(json.dumps(line) + "\n")
+    except Exception as e:
+        log.warning("could not write agent metrics (%s)", e)
+
+
+def _metrics_line(job: dict, outcome: str, err, retry_in, started: float, m: dict, result) -> dict:
+    """No payloads, prompts, keys or user ids: counts, the model, the error's class name, the judge's answer."""
+    line = {"ts": datetime.now(UTC).isoformat(timespec="milliseconds"), "job_id": job["id"], "kind": job["kind"],
+            "attempt": job["attempts"] + 1, "outcome": outcome, "error_class": err and type(err).__name__,
+            "retry_in_s": retry_in and round(retry_in, 1), "duration_ms": round((time.monotonic() - started) * 1000)}
+    if "model_calls" in m:
+        return line | m | {"model_calls_total": m["prior_model_calls"] + m["model_calls"],
+                           "cost_usd": m["cost_usd"] and round(m["cost_usd"], 6)}
+    r = result if type(result) is dict else {}
+    a = r.get("answer") if type(r.get("answer")) is dict else {}
+    return line | m | {"choice": a.get("choice"), "confidence": a.get("confidence"), "verdict": r.get("verdict"),
+                       "posted": bool(r.get("proposal_id") or r.get("posted"))}
+
+
+def _timed(m: dict, ask):
+    def call(state, questions):
+        t = time.monotonic()
+        m["jev_calls"] += 1
+        try:
+            return ask(state, questions)
+        finally:
+            m["jev_latency_ms"] += round((time.monotonic() - t) * 1000)
+    return call
 
 
 def _decode(msg) -> dict | None:
@@ -103,6 +149,14 @@ class Worker:
         self.runs_down: set[str] = set()
         self.runs_cursor = None  # newest `finished_at` seen; None reads it from `run_history`
 
+    def reconnect(self, db_url: str) -> None:
+        """New database connections after an error. Closing the old claim connection rolls back its transaction, so
+        a job claimed on it is `pending` again with its attempts unchanged."""
+        for c in (self.pg, self.jobs_pg):
+            c.close()
+        agent.reset()
+        self.pg, self.jobs_pg = psycopg.connect(db_url, autocommit=True), psycopg.connect(db_url)
+
     def _enqueue(self, job: tuple | None) -> None:
         if job and jobs.enqueue(self.pg, *job):
             log.info("enqueued %s", job[0])
@@ -164,9 +218,18 @@ class Worker:
         for consumer, translate, wait in ((self.samples, sample_job, timeout), (self.changes, self._change, 0),
                                           (self.config, lambda d: config_job(d, self.mappings, self.rules), 0)):
             msgs = consumer.consume(num_messages=BATCH, timeout=wait)
-            for msg in msgs:
-                if d := _decode(msg):
-                    self._enqueue(translate(d))
+            try:
+                for msg in msgs:
+                    if d := _decode(msg):
+                        self._enqueue(translate(d))
+            except Exception:  # rewind: the next consume reads the batch again instead of skipping past it
+                first = {}
+                for msg in msgs:
+                    if not msg.error():
+                        first.setdefault((msg.topic(), msg.partition()), msg.offset())
+                for (topic, partition), offset in first.items():
+                    consumer.seek(TopicPartition(topic, partition, offset))
+                raise
             if msgs and consumer is not self.config:
                 try:  # after the inserts: a crash before this line means redelivery, which enqueue ignores
                     consumer.commit(asynchronous=False)
@@ -179,28 +242,41 @@ class Worker:
         if job is None:
             return IDLE_S
         log.info("running %s (attempt %d)", job["id"], job["attempts"] + 1)
+        claude = KEYS[job["kind"]] == "ANTHROPIC_API_KEY"
+        m, started = agent.new_metrics() if claude else {"jev_calls": 0, "jev_latency_ms": 0}, time.monotonic()
         ctx = SimpleNamespace(api=self.api, mappings=list(self.mappings.values()),
                               other_samples=lambda: jobs.other_samples(self.jobs_pg, job["id"]),
-                              run_agent=functools.partial(agent.run_agent, thread_id=job["id"]),
-                              rules=self.rules, ask_jev=judge.ask_jev,
+                              run_agent=functools.partial(agent.run_agent, thread_id=job["id"], metrics=m),
+                              rules=self.rules, ask_jev=_timed(m, judge.ask_jev),
                               rule_stats=lambda rid: judge.stats(self.jobs_pg, rid, datetime.now(UTC)),
                               run_stats=lambda rid, rb: runs.stats(self.jobs_pg, rid, rb, datetime.now(UTC)),
                               now=lambda: datetime.now(UTC))
-        wait = 0
+        outcome, err, retry_in, result = "retry", None, None, None
         try:
-            result = HANDLERS[job["kind"]](job["input"], ctx)
-        except (JobFailed, ApiError) as e:
-            log.warning("%s failed: %s", job["id"], e)
-            status = jobs.finish(self.jobs_pg, job, error=str(e))
-        except Exception as e:
-            log.exception("%s failed, will retry", job["id"])
-            status, wait = jobs.finish(self.jobs_pg, job, error=repr(e), retry=True), RETRY_S
-        else:
-            log.info("%s done", job["id"])
-            status = jobs.finish(self.jobs_pg, job, result=result)
-        if status != "pending" and KEYS[job["kind"]] == "ANTHROPIC_API_KEY":
-            agent.forget(job["id"])  # a pending job keeps its checkpoints: the retry resumes from them
-        return wait
+            try:
+                result = HANDLERS[job["kind"]](job["input"], ctx)
+            except DB_ERRORS:
+                raise
+            except Exception as e:
+                err = e
+                if _permanent(e):
+                    log.warning("%s failed: %s", job["id"], e)
+                    status = jobs.finish(self.jobs_pg, job, error=str(e))
+                else:
+                    retry_in = jobs.backoff(job["kind"], job["attempts"] + 1)
+                    log.exception("%s failed, retry in %.0f s", job["id"], retry_in)
+                    status = jobs.finish(self.jobs_pg, job, error=repr(e), retry_in=retry_in)
+            else:
+                log.info("%s done", job["id"])
+                status = jobs.finish(self.jobs_pg, job, result=result)
+            outcome = "retry" if status == "pending" else status
+            retry_in = retry_in if status == "pending" else None
+        except DB_ERRORS as e:  # the database, not the job: main() reconnects, the row stays pending, no attempt counted
+            err, retry_in = e, None
+            raise
+        finally:
+            write_metrics(_metrics_line(job, outcome, err, retry_in, started, m, result))
+        return 0
 
 
 def main() -> None:
@@ -235,12 +311,26 @@ def main() -> None:
         log.warning("%s is not set: %s jobs are enqueued but not run", key,
                     ", ".join(k for k in HANDLERS if KEYS[k] == key))
     log.info("ai-worker started")
-    wait = 0.0
+    wait, down = 0.0, False
     while not stop:
-        worker.poll(wait)
-        if "run_risk" in worker.kinds:
-            worker.poll_runs()
-        wait = worker.run_one()
+        try:
+            if down:
+                worker.reconnect(db_url)
+                log.info("database reachable again")
+                down = False
+            worker.poll(wait)
+            if "run_risk" in worker.kinds:
+                worker.poll_runs()
+            wait = worker.run_one()
+        except DB_ERRORS as e:
+            if not down:
+                log.warning("database error (%s); reconnecting every %.0f s", e, DOWN_S)
+            down, wait = True, 0.0
+            time.sleep(DOWN_S)
+        except KafkaException as e:
+            log.warning("kafka error (%s); retrying in %.0f s", e, DOWN_S)
+            wait = 0.0
+            time.sleep(DOWN_S)
     for c in (samples, changes, config):
         c.close()
     log.info("ai-worker stopped")

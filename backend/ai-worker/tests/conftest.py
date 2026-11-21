@@ -7,6 +7,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from langgraph.checkpoint.postgres import PostgresSaver
 
 MIGRATIONS = Path(__file__).parent.parent / "migrations"
 
@@ -46,12 +47,20 @@ def db(pg_url):
     with psycopg.connect(pg_url, autocommit=True) as c:
         for f in sorted(MIGRATIONS.glob("*.sql")):
             c.execute(f.read_text())
+        PostgresSaver(c).setup()  # jobs.finish deletes a finished job's checkpoints
     return pg_url
+
+
+@pytest.fixture(autouse=True)
+def metrics_file(tmp_path, monkeypatch):
+    path = tmp_path / "agent-metrics.jsonl"
+    monkeypatch.setenv("AGENT_METRICS_FILE", str(path))
+    return path
 
 
 @pytest.fixture
 def conns(db):
     """(autocommit connection for enqueue and asserts, transactional connection for claims) on empty tables."""
     with psycopg.connect(db, autocommit=True) as pg, psycopg.connect(db) as jobs_pg:
-        pg.execute("TRUNCATE jobs, alert_history, run_history")
+        pg.execute("TRUNCATE jobs, alert_history, run_history, checkpoints, checkpoint_blobs, checkpoint_writes")
         yield pg, jobs_pg
