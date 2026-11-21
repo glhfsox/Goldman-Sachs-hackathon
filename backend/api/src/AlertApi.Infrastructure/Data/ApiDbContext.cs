@@ -41,6 +41,8 @@ public class ApiDbContext : DbContext, IUnitOfWork
 
     public DbSet<ActionTarget> ActionTargets => Set<ActionTarget>();
 
+    public DbSet<Proposal> Proposals => Set<Proposal>();
+
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
 
     // Services save through IUnitOfWork; a lost race on a concurrency token (runbooks.version) becomes a 409.

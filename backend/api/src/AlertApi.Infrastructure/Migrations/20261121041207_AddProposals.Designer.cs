@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AlertApi.Infrastructure.Migrations
 {
     [DbContext(typeof(ApiDbContext))]
-    [Migration("20261121041516_AddActionTargets")]
-    partial class AddActionTargets
+    [Migration("20261121041207_AddProposals")]
+    partial class AddProposals
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -24,46 +24,6 @@ namespace AlertApi.Infrastructure.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("AlertApi.Domain.Models.ActionTarget", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text")
-                        .HasColumnName("id");
-
-                    b.Property<string>("BaseUrl")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("base_url");
-
-                    b.Property<string>("Operations")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("operations");
-
-                    b.Property<string>("Origins")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("origins");
-
-                    b.Property<string>("SecretRef")
-                        .HasColumnType("text")
-                        .HasColumnName("secret_ref");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id")
-                        .HasName("PK_action_targets");
-
-                    b.ToTable("action_targets", (string)null);
-                });
 
             modelBuilder.Entity("AlertApi.Domain.Models.Alert", b =>
                 {
@@ -346,6 +306,61 @@ namespace AlertApi.Infrastructure.Migrations
                     b.ToTable("outbox", (string)null);
                 });
 
+            modelBuilder.Entity("AlertApi.Domain.Models.Proposal", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AlertId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("alert_id");
+
+                    b.Property<string>("Author")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("author");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("body");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<string>("DecidedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("decided_by");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("PK_proposals");
+
+                    b.HasIndex("AlertId", "Kind")
+                        .HasDatabaseName("IX_proposals_alert_id_kind");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("IX_proposals_status_created_at");
+
+                    b.ToTable("proposals", (string)null);
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.Rule", b =>
                 {
                     b.Property<string>("Id")
@@ -427,7 +442,6 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasColumnName("updated_at");
 
                     b.Property<int>("Version")
-                        .IsConcurrencyToken()
                         .HasColumnType("integer")
                         .HasColumnName("version");
 

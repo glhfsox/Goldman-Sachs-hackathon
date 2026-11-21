@@ -85,13 +85,15 @@ Owned by the api and read only by it, so it is not published on `config.changes`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | text, primary key | |
-| `alert_id` | text | |
-| `kind` | text, not null | `threshold`, `template`, `runbook` |
-| `body` | jsonb, not null | |
+| `id` | text, primary key | A UUID |
+| `alert_id` | text, not null | The alert it was filed on; indexed with `kind` |
+| `kind` | text, not null | `threshold`, `template`, `runbook`, `rule_severity`, `runbook_start` |
+| `body` | jsonb, not null | The shape per kind is in [../api.md](../api.md) |
 | `author` | text, not null | A user id or `ai-worker` |
-| `status` | text, not null | `open`, `accepted`, `rejected` |
-| `decided_by` | text | |
+| `status` | text, not null | `open`, `accepted`, `rejected`; indexed with `created_at` |
+| `decided_by` | text | The person who accepted or rejected it |
+| `created_at` | timestamptz, not null | |
+| `decided_at` | timestamptz | |
 
 ### `outbox`
 

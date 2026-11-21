@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 using AlertApi.Application.DTOs.Messages;
@@ -6,6 +7,7 @@ using AlertApi.Application.DTOs.Requests;
 using AlertApi.Application.DTOs.Responses;
 using AlertApi.Application.Exceptions;
 using AlertApi.Application.Interfaces;
+using AlertApi.Application.Serialization;
 using AlertApi.Application.Validation;
 using AlertApi.Domain.Models;
 using AlertApi.Domain.Repositories;
@@ -66,6 +68,42 @@ public sealed partial class RunbookService : IRunbookService
 
         var id = await FreeIdAsync(Slug(request.Title!), cancellationToken);
         var runbook = Runbook.Create(id, request.TeamId!, request.Title!, request.Format!, request.Source!, _timeProvider.GetUtcNow());
+
+        await _repository.AddAsync(runbook, cancellationToken);
+
+        return await PublishAsync(runbook, cancellationToken);
+    }
+
+    public async Task<RunbookResponse> CreateAcceptedAsync(
+        string teamId,
+        string title,
+        JsonElement canonical,
+        string userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (canonical.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidRunbookException([new ProblemItem("canonical", "must be an object")]);
+        }
+
+        var id = await FreeIdAsync(Slug(title), cancellationToken);
+
+        // The id comes from the title like any new runbook, so the id the proposal's canonical carries is replaced.
+        var node = JsonNode.Parse(canonical.GetRawText())!.AsObject();
+        node["id"] = id;
+        var text = node.ToJsonString();
+        var problems = RunbookValidator.ValidateCanonical(RecordJson.ToElement(text), id, await _catalog.GetAsync(cancellationToken));
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidRunbookException(problems);
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var runbook = Runbook.Create(id, teamId, title, "canonical", text, now);
+        runbook.SetCanonical(text, now);
+        runbook.SetStatus(Runbook.Active, now);
+        runbook.Accept(userId, now);
 
         await _repository.AddAsync(runbook, cancellationToken);
 
