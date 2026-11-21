@@ -20,15 +20,18 @@ public sealed class ActivityService : IActivityService
     private readonly INotificationRepository _notifications;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IUiPublisher _ui;
+    private readonly IRunAutomation _automation;
 
     public ActivityService(
         IAlertRepository alerts,
         IAlertEventRepository events,
         INotificationRepository notifications,
         IUnitOfWork unitOfWork,
-        IUiPublisher ui)
+        IUiPublisher ui,
+        IRunAutomation automation)
     {
         _ui = ui;
+        _automation = automation;
         _alerts = alerts;
         _events = events;
         _notifications = notifications;
@@ -63,11 +66,22 @@ public sealed class ActivityService : IActivityService
 
         if (alert is null)
         {
-            await _alerts.AddAsync(Alert.Create(snapshot), cancellationToken);
+            alert = Alert.Create(snapshot);
+            await _alerts.AddAsync(alert, cancellationToken);
         }
         else
         {
             alert.ReplaceWith(snapshot);
+        }
+
+        // Runs are staged in the same save as the timeline row, so a record seen twice starts or cancels once.
+        if (addedTimelineRow && message.Change is "opened" or "reopened")
+        {
+            await _automation.StageStartAsync(alert, message.ChangeId, message.At, cancellationToken);
+        }
+        else if (addedTimelineRow && message.Change == "resolved")
+        {
+            await _automation.StageCancelAsync(alert.Id, message.Actor, cancellationToken);
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);

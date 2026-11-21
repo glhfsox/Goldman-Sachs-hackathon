@@ -80,6 +80,12 @@ builder.Services.AddSingleton(new RunExecutorOptions
     Concurrency = builder.Configuration.GetValue("RUNBOOK_CONCURRENCY", 4)
 });
 builder.Services.AddScoped<IRunExecutor, RunExecutor>();
+builder.Services.AddScoped<IRunbookStartRepository, RunbookStartRepository>();
+builder.Services.AddSingleton(new RunAutomationOptions
+{
+    CancelWindow = TimeSpan.FromSeconds(builder.Configuration.GetValue("RUNBOOK_CANCEL_WINDOW_S", 30))
+});
+builder.Services.AddScoped<IRunAutomation, RunAutomationService>();
 
 // A separate container can run the executor alone: switch it off in the api replicas with RUNBOOK_EXECUTOR=false.
 if (builder.Configuration.GetValue("RUNBOOK_EXECUTOR", true))

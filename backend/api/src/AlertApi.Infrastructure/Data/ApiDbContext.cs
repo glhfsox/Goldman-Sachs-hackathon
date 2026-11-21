@@ -47,6 +47,8 @@ public class ApiDbContext : DbContext, IUnitOfWork
 
     public DbSet<ActionRun> ActionRuns => Set<ActionRun>();
 
+    public DbSet<RunbookStart> RunbookStarts => Set<RunbookStart>();
+
     public DbSet<Proposal> Proposals => Set<Proposal>();
 
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();

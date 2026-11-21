@@ -51,8 +51,12 @@ public sealed class RunExecutorWorker : BackgroundService
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var executor = scope.ServiceProvider.GetRequiredService<IRunExecutor>();
+                var automation = scope.ServiceProvider.GetRequiredService<IRunAutomation>();
 
-                if (await executor.ExecuteNextAsync(stoppingToken))
+                // The same loops also start runs whose cancel window ended; the claim keeps replicas apart.
+                var started = await automation.StartDueAsync(stoppingToken);
+
+                if (await executor.ExecuteNextAsync(stoppingToken) || started)
                 {
                     delay = TimeSpan.Zero;
                 }
