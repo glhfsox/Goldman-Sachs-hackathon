@@ -8,6 +8,7 @@ using AlertApi.Domain.Repositories;
 using AlertApi.Infrastructure.Data;
 using AlertApi.Infrastructure.Kafka;
 using AlertApi.Infrastructure.Outbox;
+using AlertApi.Infrastructure.Queries;
 using AlertApi.Infrastructure.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -31,6 +32,9 @@ builder.Services.AddScoped<IRuleRepository, RuleRepository>();
 builder.Services.AddScoped<IRuleService, RuleService>();
 builder.Services.AddScoped<IMappingRepository, MappingRepository>();
 builder.Services.AddScoped<IMappingService, MappingService>();
+builder.Services.AddScoped<IReferenceDataQueries, ReferenceDataQueries>();
+builder.Services.AddScoped<IPreferencesRepository, PreferencesRepository>();
+builder.Services.AddScoped<IPreferencesService, PreferencesService>();
 builder.Services.AddSingleton<IEventPublisher>(_ => new KafkaEventPublisher(kafkaBrokers));
 builder.Services.AddHostedService(provider => new OutboxPublisher(
     provider.GetRequiredService<IServiceScopeFactory>(),
@@ -73,6 +77,8 @@ app.MapHealthEndpoints();
 app.MapSourceEndpoints();
 app.MapRuleEndpoints();
 app.MapMappingEndpoints();
+app.MapTeamEndpoints();
+app.MapUserEndpoints();
 
 app.Run();
 

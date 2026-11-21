@@ -51,8 +51,9 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `PUT /schema-samples/{fingerprint}` | `{status: "failed", error}` | the sample; the ai-worker calls it when it could not produce a valid mapping, so a person writes one in the UI |
 | `GET /sources`, `GET /sources/{id}`, `POST /sources` | `{id, kind, config}` | `Source`. `id`: lowercase letters, digits, `-`; a `kafka` source needs `config.topic`; `422 invalid_source` otherwise, `409 conflict` for a taken id |
 | `PUT /sources/{id}` | `{kind, config, enabled}` | `Source` (also how a source is disabled) |
-| `GET /teams`, `GET /users` | | lists for pickers; a team includes `members` and who is on call |
-| `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` | `Preferences` |
+| `GET /teams` | | `[{id, name, members: [{user_id, name, on_call}]}]`, for pickers; read-only (seeded) |
+| `GET /users` | | `[{id, name, email, phone}]`, for the user picker; read-only (seeded) |
+| `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` ([rules.md](rules.md) §5) | `Preferences`. `PUT` creates or replaces; `422 invalid_preferences` (one `details` entry per wrong path, `user_id` must equal the URL id), `404 not_found` for an unknown user, or for `GET` a user without preferences |
 | `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` until the ai-worker has converted it, [runbooks.md](runbooks.md)) |
 | `PUT /runbooks/{id}` | `{canonical?, status?}` | `Runbook` |
 | `POST /alerts/{id}/actions` | `{runbook_id, step_index}` | `ActionRun`: `running`, or `waiting_approval` when the step needs approval |
