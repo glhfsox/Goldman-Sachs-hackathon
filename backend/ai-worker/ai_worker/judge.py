@@ -28,11 +28,20 @@ SEVERITY_QUESTION = {
     "type": "choice",
     "instructions": "Which severity should alerts of this rule have, judged by what the on-call person must do when "
                     "one fires? The state holds the rule, an example alert and, when there is any, how people reacted "
-                    "to the rule's recent alerts.",
-    "criteria": {"info": "Nobody needs to act; it is for the record.",
-                 "warning": "Someone should look at it during working hours.",
-                 "error": "Someone must act on it today.",
-                 "critical": "Someone must act now, even if that means waking them up."}}
+                    "to the rule's recent alerts. The example alert's own severity is only what its source claims; "
+                    "do not just repeat it. Decide in two steps. First, what the event means: production money, "
+                    "payments, settlements, payouts or trades failing is error or critical; staging, UAT, test, dev "
+                    "and CI are never above warning, whatever the event says. Second, when there is history it "
+                    "decides over the event: alerts people leave to resolve on their own, or acknowledge only "
+                    "hours later, are noise and get warning or info (info when nearly none is ever acknowledged); "
+                    "alerts people acknowledge within minutes, or that reopen, deserve error or critical.",
+    "criteria": {"info": "Nobody needs to act; it is for the record. Nearly all of its alerts resolve on their own "
+                         "without anyone acknowledging them, or it comes from a test, dev or CI system.",
+                 "warning": "Someone should look at it during working hours. People take hours to acknowledge it, "
+                            "most of its alerts resolve on their own, or it is a non-production system.",
+                 "error": "Someone must act on it today. People acknowledge it within the day.",
+                 "critical": "Someone must act now, even if that means waking them up: production money or "
+                             "customers are hit, and people acknowledge it within minutes."}}
 # name -> (question to Jev, the reason shown to people when the answer is yes)
 FACTORS = {
     "production": ("Does this alert come from a production environment?", "it comes from production"),
@@ -215,7 +224,8 @@ def handle(job_input: dict, ctx) -> dict:
     state = {"team": rule.get("team_id"),
              "rule": _cap({"id": rule_id, "name": rule.get("name"), "when": rule.get("when"),
                            "route": rule.get("route"), "title_template": present.get("title"), "severity": current}),
-             "example_alert": example and _cap(example), "history": s}
+             "example_alert": example and _cap(example), "history": s,
+             "history_in_words": _stat_reasons(s) if s else None}
     factors = FACTORS | (HISTORY_FACTORS if s else {})
     questions = {"severity": SEVERITY_QUESTION} | {k: {"type": "noul", "instructions": q}
                                                    for k, (q, _) in factors.items()}

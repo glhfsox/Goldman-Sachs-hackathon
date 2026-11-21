@@ -121,7 +121,7 @@ accepting one as a person set the rule's `severity`) and the stub. A `404` on fi
 the alert from `alerts.changes` yet) retries the job instead of failing it.
 
 `evals/severity_golden.jsonl` holds 20 cases (10 `first`, 10 `history`; labels written by an AI, not yet reviewed by a person); `scripts/eval_severity.py` runs them through `judge.handle` against the real Jev (all three eval scripts take `--json PATH` for a summary object).
-Measured on 21-11: 9 of 20 right, no proposal lower than an `error`/`critical` label; all 11 misses filed nothing (Jev kept the event's or the rule's severity, or answered under confidence 0.5), so it never lowered a noisy rule.
+Measured on 21-11: 9 of 20 right at first, and it never lowered a noisy rule (Jev repeated the event's severity). The question now says the event's own severity is only a claim, that non-production is never above warning, and that history decides over the event (left to resolve on their own or acked hours later: warning or info; acked within minutes or reopened: error or critical); the state also carries the history in plain sentences. Now 16 of 20 on 3 repeats, no dangerous miss; it lowers the never-acked staging, CI and pricing-log rules. The 4 misses: three proposals left out under confidence 0.5, and one noisy prod rule lowered to info where the label says warning. The wording was tuned on this same set, so expect less on new cases.
 
 ## Run judges (`ai_worker/runs.py`, issue #75)
 

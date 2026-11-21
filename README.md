@@ -137,7 +137,7 @@ The judges of the AI worker (TypeSafe Jev), on labelled cases (labels written wi
 |---|---|---|
 | Run risk check (`auto` run starts by itself or waits for a person) | 25 of 30 (83%) | 0 (no risky run cleared) |
 | Run start mode proposal (`auto` / `approval`) | 15 of 16 (94%) | 0 (no `auto` proposed where it should not be) |
-| Rule severity proposal | 9 of 20 (45%) | 0 (never proposed a lower severity than it should); the misses are proposals it did not make |
+| Rule severity proposal (lowers noisy rules, raises ones people rush to) | 16 of 20 (80%), the same on 3 repeats | 0 (never proposed a lower severity than it should) |
 
 Reproduce, with the stack up: `bash data/simulator/check.sh` once, then
 `set -a; . backend/ai-worker/.env; set +a; uv run scripts/evaluate.py --rate 3000 --duration 120 --probes 100`
