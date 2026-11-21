@@ -23,7 +23,10 @@ public sealed class SourceMigrationTests : IClassFixture<PostgresFixture>
         await using var context = new ApiDbContext(new DbContextOptionsBuilder<ApiDbContext>().UseNpgsql(connection).Options);
 
         await context.Database.MigrateAsync();
-        var messages = await context.Outbox.OrderBy(message => message.Id).ToListAsync();
+        var messages = await context.Outbox
+            .Where(message => message.Key.StartsWith("source:"))
+            .OrderBy(message => message.Id)
+            .ToListAsync();
 
         Assert.Equal(
             ["source:alertmanager-http", "source:pricing-logs-http", "source:trades-kafka", "source:workflows-kafka"],

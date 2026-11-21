@@ -62,6 +62,28 @@ namespace AlertApi.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("AlertApi.Domain.Models.Membership", b =>
+                {
+                    b.Property<string>("TeamId")
+                        .HasColumnType("text")
+                        .HasColumnName("team_id");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.Property<bool>("OnCall")
+                        .HasColumnType("boolean")
+                        .HasColumnName("on_call");
+
+                    b.HasKey("TeamId", "UserId")
+                        .HasName("PK_memberships");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("memberships", (string)null);
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.OutboxMessage", b =>
                 {
                     b.Property<long>("Id")
@@ -129,6 +151,22 @@ namespace AlertApi.Infrastructure.Migrations
                     b.ToTable("rules", (string)null);
                 });
 
+            modelBuilder.Entity("AlertApi.Domain.Models.ServiceDependency", b =>
+                {
+                    b.Property<string>("Service")
+                        .HasColumnType("text")
+                        .HasColumnName("service");
+
+                    b.Property<string>("DependsOn")
+                        .HasColumnType("text")
+                        .HasColumnName("depends_on");
+
+                    b.HasKey("Service", "DependsOn")
+                        .HasName("PK_service_deps");
+
+                    b.ToTable("service_deps", (string)null);
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.Source", b =>
                 {
                     b.Property<string>("Id")
@@ -160,6 +198,94 @@ namespace AlertApi.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("CK_sources_kind", "kind IN ('http', 'kafka')");
                         });
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.Team", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id")
+                        .HasName("PK_teams");
+
+                    b.ToTable("teams", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.User", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("email");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("phone");
+
+                    b.HasKey("Id")
+                        .HasName("PK_users");
+
+                    b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.UserPreferences", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("body");
+
+                    b.HasKey("UserId")
+                        .HasName("PK_preferences");
+
+                    b.ToTable("preferences", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.Membership", b =>
+                {
+                    b.HasOne("AlertApi.Domain.Models.Team", null)
+                        .WithMany()
+                        .HasForeignKey("TeamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_memberships_team");
+
+                    b.HasOne("AlertApi.Domain.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_memberships_user");
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.UserPreferences", b =>
+                {
+                    b.HasOne("AlertApi.Domain.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_preferences_user");
                 });
 #pragma warning restore 612, 618
         }
