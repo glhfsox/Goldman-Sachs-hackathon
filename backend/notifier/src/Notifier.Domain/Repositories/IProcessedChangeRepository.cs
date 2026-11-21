@@ -4,7 +4,8 @@ namespace Notifier.Domain.Repositories;
 
 public interface IProcessedChangeRepository
 {
-    Task<bool> ExistsAsync(string changeId, CancellationToken cancellationToken = default);
+    // Of the given change ids, the ones already processed.
+    Task<IReadOnlySet<string>> GetExistingAsync(IReadOnlyCollection<string> changeIds, CancellationToken cancellationToken = default);
 
     Task AddAsync(ProcessedChange change, CancellationToken cancellationToken = default);
 

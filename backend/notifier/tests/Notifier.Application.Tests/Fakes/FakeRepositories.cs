@@ -48,32 +48,30 @@ public sealed class FakeRepositories :
         _store.Notifications.Add(notification);
     }
 
-    public async Task<IReadOnlyList<Notification>> GetOpenByAlertAsync(string alertId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Notification>> GetOpenByAlertsAsync(IReadOnlyCollection<string> alertIds, CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
 
-        return _store.Notifications.Where(notification => notification.AlertId == alertId && notification.IsOpen).ToList();
+        return _store.Notifications.Where(notification => alertIds.Contains(notification.AlertId) && notification.IsOpen).ToList();
     }
 
-    public Task LockGroupAsync(string groupKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task LockGroupsAsync(IReadOnlyCollection<string> groupKeys, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public async Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
+    public async Task<IReadOnlyList<NotifiedEntry>> GetNotifiedAsync(
         IReadOnlyCollection<string> userIds,
-        string groupKey,
-        string excludedAlertId,
+        IReadOnlyCollection<string> groupKeys,
         DateTime since,
         CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
 
         return _store.Notifications.Where(notification => userIds.Contains(notification.UserId)
-            && notification.GroupKey == groupKey
-            && notification.AlertId != excludedAlertId
+            && groupKeys.Contains(notification.GroupKey)
             && notification.Channel != "ui"
             && notification.CreatedAt >= since
             && notification.Status is NotificationStatus.Pending or NotificationStatus.Sent or NotificationStatus.Failed)
-            .Select(notification => notification.UserId)
-            .ToHashSet();
+            .Select(notification => new NotifiedEntry(notification.GroupKey, notification.UserId, notification.AlertId, notification.CreatedAt))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<string>> ClaimDueAsync(
@@ -99,11 +97,11 @@ public sealed class FakeRepositories :
         return _store.Notifications.RemoveAll(notification => !notification.IsOpen && notification.UpdatedAt < before);
     }
 
-    public async Task<Alert?> FindAsync(string id, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Alert>> GetByIdsAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
 
-        return _store.Alerts.FirstOrDefault(alert => alert.Id == id);
+        return _store.Alerts.Where(alert => ids.Contains(alert.Id)).ToList();
     }
 
     public async Task<AlertStatus?> GetStatusAsync(string id, CancellationToken cancellationToken = default)
@@ -258,11 +256,11 @@ public sealed class FakeRepositories :
         return _store.ProcessedChanges.RemoveAll(change => change.ProcessedAt < before);
     }
 
-    async Task<bool> IProcessedChangeRepository.ExistsAsync(string changeId, CancellationToken cancellationToken)
+    public async Task<IReadOnlySet<string>> GetExistingAsync(IReadOnlyCollection<string> changeIds, CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
 
-        return _store.ProcessedChanges.Any(change => change.ChangeId == changeId);
+        return _store.ProcessedChanges.Select(change => change.ChangeId).Where(changeIds.Contains).ToHashSet();
     }
 
     public async Task AddAsync(ProcessedChange change, CancellationToken cancellationToken = default)

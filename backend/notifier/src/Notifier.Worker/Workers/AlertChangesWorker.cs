@@ -17,9 +17,21 @@ public sealed class AlertChangesWorker : KafkaConsumerWorker<AlertChangeMessage>
 
     protected override string Topic => Topics.AlertsChanges;
 
+    // One transaction per batch instead of per record: in a burst, planning was bound by per-record round trips and commits.
+    protected override int MaxBatchSize => 100;
+
     protected override async Task HandleAsync(IServiceProvider services, AlertChangeMessage message, CancellationToken cancellationToken)
     {
         var alertChanges = services.GetRequiredService<IAlertChangeService>();
         await alertChanges.HandleAsync(message, cancellationToken);
+    }
+
+    protected override async Task HandleBatchAsync(
+        IServiceProvider services,
+        IReadOnlyList<AlertChangeMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        var alertChanges = services.GetRequiredService<IAlertChangeService>();
+        await alertChanges.HandleBatchAsync(messages, cancellationToken);
     }
 }

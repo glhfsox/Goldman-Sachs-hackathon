@@ -15,10 +15,21 @@ public sealed class ProcessedChangeRepository : IProcessedChangeRepository
         _context = context;
     }
 
-    public async Task<bool> ExistsAsync(string changeId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlySet<string>> GetExistingAsync(
+        IReadOnlyCollection<string> changeIds,
+        CancellationToken cancellationToken = default)
     {
-        return await _context.ProcessedChanges.AsNoTracking()
-            .AnyAsync(change => change.ChangeId == changeId, cancellationToken);
+        if (changeIds.Count == 0)
+        {
+            return new HashSet<string>();
+        }
+
+        var existing = await _context.ProcessedChanges.AsNoTracking()
+            .Where(change => changeIds.Contains(change.ChangeId))
+            .Select(change => change.ChangeId)
+            .ToListAsync(cancellationToken);
+
+        return existing.ToHashSet();
     }
 
     public async Task AddAsync(ProcessedChange change, CancellationToken cancellationToken = default)

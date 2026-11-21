@@ -16,9 +16,14 @@ public sealed class AlertRepository : IAlertRepository
         _context = context;
     }
 
-    public async Task<Alert?> FindAsync(string id, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Alert>> GetByIdsAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken = default)
     {
-        return await _context.Alerts.FirstOrDefaultAsync(alert => alert.Id == id, cancellationToken);
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        return await _context.Alerts.Where(alert => ids.Contains(alert.Id)).ToListAsync(cancellationToken);
     }
 
     public async Task<AlertStatus?> GetStatusAsync(string id, CancellationToken cancellationToken = default)

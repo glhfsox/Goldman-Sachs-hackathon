@@ -5,7 +5,8 @@ namespace Notifier.Domain.Repositories;
 
 public interface IAlertRepository
 {
-    Task<Alert?> FindAsync(string id, CancellationToken cancellationToken = default);
+    // Tracked: changes to the returned copies are saved.
+    Task<IReadOnlyList<Alert>> GetByIdsAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken = default);
 
     Task<AlertStatus?> GetStatusAsync(string id, CancellationToken cancellationToken = default);
 

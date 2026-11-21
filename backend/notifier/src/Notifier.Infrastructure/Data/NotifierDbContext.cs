@@ -18,6 +18,9 @@ public class NotifierDbContext : DbContext
     public NotifierDbContext(DbContextOptions<NotifierDbContext> options)
         : base(options)
     {
+        // Nothing retries a failed save inside its transaction, so the SAVEPOINT / RELEASE pair EF wraps around
+        // every save in an open transaction would only cost two round trips.
+        Database.AutoSavepointsEnabled = false;
     }
 
     public DbSet<Notification> Notifications => Set<Notification>();

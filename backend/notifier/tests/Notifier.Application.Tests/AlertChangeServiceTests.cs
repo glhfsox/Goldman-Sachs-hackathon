@@ -110,6 +110,65 @@ public sealed class AlertChangeServiceTests
     }
 
     [Fact]
+    public async Task A_batch_is_saved_once()
+    {
+        var harness = new Harness();
+        await harness.SeedRuleAsync("rule-1", ["sms"], "marek");
+        var saves = harness.Repositories.SaveCalls;
+
+        await harness.AlertChanges.HandleBatchAsync([
+            Harness.Change(AlertChanges.Opened, alertId: "alert-1", changeId: "change-1"),
+            Harness.Change(AlertChanges.Opened, alertId: "alert-2", changeId: "change-2")]);
+
+        Assert.Equal(saves + 1, harness.Repositories.SaveCalls);
+        Assert.Equal(2, harness.Store.Notifications.Count);
+        Assert.Equal(2, harness.Store.ProcessedChanges.Count);
+    }
+
+    [Fact]
+    public async Task An_ack_in_the_same_batch_cancels_what_the_open_planned()
+    {
+        var harness = new Harness();
+        await harness.SeedRuleAsync("rule-1", ["email", "sms", "ui"], "marek");
+
+        await harness.AlertChanges.HandleBatchAsync([
+            Harness.Change(AlertChanges.Opened, severity: "warning"),
+            Harness.Change(AlertChanges.Acked, severity: "warning", changeId: "change-ack")]);
+
+        Assert.NotEmpty(harness.Store.Notifications);
+        Assert.All(harness.Store.Notifications, notification => Assert.Equal(NotificationStatus.Cancelled, notification.Status));
+    }
+
+    [Fact]
+    public async Task Two_alerts_of_one_incident_in_one_batch_send_one_message_per_person()
+    {
+        var harness = new Harness();
+        await harness.SeedRuleAsync("rule-1", ["sms"], "marek");
+        await harness.SeedRuleAsync("rule-2", ["sms"], "marek");
+
+        await harness.AlertChanges.HandleBatchAsync([
+            Harness.Change(AlertChanges.Opened, alertId: "alert-1", ruleId: "rule-1", incidentId: "incident-1", changeId: "change-1"),
+            Harness.Change(AlertChanges.Opened, alertId: "alert-2", ruleId: "rule-2", incidentId: "incident-1", changeId: "change-2")]);
+
+        Assert.Single(harness.Store.Notifications, notification => notification.IsOpen);
+        Assert.Equal(NotificationStatus.Suppressed, harness.Store.Notifications.Single(notification => notification.AlertId == "alert-2").Status);
+    }
+
+    [Fact]
+    public async Task A_change_repeated_within_a_batch_and_an_invalid_record_are_skipped()
+    {
+        var harness = new Harness();
+        await harness.SeedRuleAsync("rule-1", ["sms"], "marek");
+        var change = Harness.Change(AlertChanges.Opened);
+        var invalid = change with { Alert = default };
+
+        await harness.AlertChanges.HandleBatchAsync([change, invalid, change]);
+
+        Assert.Single(harness.Store.Notifications);
+        Assert.Single(harness.Store.ProcessedChanges);
+    }
+
+    [Fact]
     public async Task A_deleted_membership_disappears_from_the_copy()
     {
         var harness = new Harness();

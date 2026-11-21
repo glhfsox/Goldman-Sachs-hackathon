@@ -1,4 +1,5 @@
 using Notifier.Domain.Models;
+using Notifier.Domain.ValueObjects;
 
 namespace Notifier.Domain.Repositories;
 
@@ -13,17 +14,17 @@ public interface INotificationRepository
 
     Task AddAsync(Notification notification, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<Notification>> GetOpenByAlertAsync(string alertId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Notification>> GetOpenByAlertsAsync(IReadOnlyCollection<string> alertIds, CancellationToken cancellationToken = default);
 
-    // Serializes planning for one group (incident) until the next save, so two alerts of one incident planned
-    // at the same time on other partitions or replicas still send one message per person.
-    Task LockGroupAsync(string groupKey, CancellationToken cancellationToken = default);
+    // Serializes planning for these groups (incidents) until the next save, so two alerts of one incident planned
+    // at the same time on other partitions or replicas still send one message per person. One statement for all
+    // groups, taken in a fixed order so two batches never deadlock.
+    Task LockGroupsAsync(IReadOnlyCollection<string> groupKeys, CancellationToken cancellationToken = default);
 
-    // Of the given users, those already told about this group (incident) through another alert since `since`.
-    Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
+    // Non-UI rows that still count as "told" (pending, sent, failed) for these users and groups since `since`.
+    Task<IReadOnlyList<NotifiedEntry>> GetNotifiedAsync(
         IReadOnlyCollection<string> userIds,
-        string groupKey,
-        string excludedAlertId,
+        IReadOnlyCollection<string> groupKeys,
         DateTime since,
         CancellationToken cancellationToken = default);
 

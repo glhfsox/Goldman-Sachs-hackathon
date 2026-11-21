@@ -64,54 +64,64 @@ public sealed class NotificationRepository : INotificationRepository
         await _context.Notifications.AddAsync(notification, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<Notification>> GetOpenByAlertAsync(string alertId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Notification>> GetOpenByAlertsAsync(
+        IReadOnlyCollection<string> alertIds,
+        CancellationToken cancellationToken = default)
     {
+        if (alertIds.Count == 0)
+        {
+            return [];
+        }
+
         return await _context.Notifications
-            .Where(notification => notification.AlertId == alertId
+            .Where(notification => alertIds.Contains(notification.AlertId)
                 && (notification.Status == NotificationStatus.Pending || notification.Status == NotificationStatus.Failed))
             .ToListAsync(cancellationToken);
     }
 
-    // A transaction-scoped advisory lock; NotifierDbContext.SaveChangesAsync commits the transaction and frees it.
-    public async Task LockGroupAsync(string groupKey, CancellationToken cancellationToken = default)
+    // Transaction-scoped advisory locks; NotifierDbContext.SaveChangesAsync commits the transaction and frees them.
+    // Keys are sorted here and taken in array order (ORDER BY ordinality defers the volatile lock call past the sort).
+    public async Task LockGroupsAsync(IReadOnlyCollection<string> groupKeys, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(groupKey);
+        var keys = groupKeys.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        if (keys.Length == 0)
+        {
+            return;
+        }
 
         if (_context.Database.CurrentTransaction is null)
         {
             await _context.Database.BeginTransactionAsync(cancellationToken);
         }
 
-        await _context.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtext({0}))", [groupKey], cancellationToken);
+        await _context.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock(hashtext(locks.key)) FROM unnest({0}::text[]) WITH ORDINALITY AS locks(key, position) ORDER BY locks.position",
+            new object[] { keys },
+            cancellationToken);
     }
 
     // UI rows do not count: seeing a card in the feed is not "being notified" about the incident.
-    public async Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
+    public async Task<IReadOnlyList<NotifiedEntry>> GetNotifiedAsync(
         IReadOnlyCollection<string> userIds,
-        string groupKey,
-        string excludedAlertId,
+        IReadOnlyCollection<string> groupKeys,
         DateTime since,
         CancellationToken cancellationToken = default)
     {
-        if (userIds.Count == 0)
+        if (userIds.Count == 0 || groupKeys.Count == 0)
         {
-            return new HashSet<string>();
+            return [];
         }
 
-        var notified = await _context.Notifications.AsNoTracking()
+        return await _context.Notifications.AsNoTracking()
             .Where(notification => userIds.Contains(notification.UserId)
-                && notification.GroupKey == groupKey
-                && notification.AlertId != excludedAlertId
+                && groupKeys.Contains(notification.GroupKey)
                 && notification.Channel != "ui"
                 && notification.CreatedAt >= since
                 && (notification.Status == NotificationStatus.Pending
                     || notification.Status == NotificationStatus.Sent
                     || notification.Status == NotificationStatus.Failed))
-            .Select(notification => notification.UserId)
-            .Distinct()
+            .Select(notification => new NotifiedEntry(notification.GroupKey, notification.UserId, notification.AlertId, notification.CreatedAt))
             .ToListAsync(cancellationToken);
-
-        return notified.ToHashSet();
     }
 
     public async Task<IReadOnlyList<string>> ClaimDueAsync(

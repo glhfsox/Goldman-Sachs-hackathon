@@ -67,47 +67,92 @@ public sealed class AlertChangeService : IAlertChangeService
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        if (await _processedChanges.ExistsAsync(message.ChangeId, cancellationToken))
-        {
-            _logger.LogDebug("Alert change {ChangeId} was already processed; skipping the redelivery", message.ChangeId);
+        await HandleBatchAsync([message], cancellationToken);
+    }
 
+    // Every lookup is one query for the whole batch, and the batch commits once: the cost per record is
+    // in-memory work, not round trips. Records are still applied one after another, in consumption order.
+    public async Task HandleBatchAsync(IReadOnlyList<AlertChangeMessage> messages, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+
+        var changes = await ReadNewChangesAsync(messages, cancellationToken);
+        if (changes.Count == 0)
+        {
             return;
         }
 
-        var alert = ReadAlert(message);
         var now = _clock.UtcNow;
-        var dueNow = false;
-        if (await ApplyToCopyAsync(alert, message, cancellationToken))
+        var config = await _configCache.GetAsync(_config, cancellationToken);
+        var copies = (await _alerts.GetByIdsAsync(changes.Select(change => change.Alert.Id).Distinct().ToList(), cancellationToken))
+            .ToDictionary(copy => copy.Id);
+
+        // Plans are pure: drafted for every change that may plan, used only if the change turns out newer than the copy.
+        var drafts = changes
+            .Where(change => change.Message.Change is AlertChanges.Opened or AlertChanges.Reopened or AlertChanges.SeverityRaised)
+            .ToDictionary(change => change.Message.ChangeId, change => Draft(change.Alert, change.Message.ChangeId, config, now));
+        var plans = drafts.Values.OfType<PlanDraft>().ToList();
+        var groupKeys = plans.Select(plan => plan.GroupKey).Distinct().ToList();
+        var batch = new BatchState();
+
+        if (plans.Count > 0)
         {
-            switch (message.Change)
-            {
-                case AlertChanges.Opened:
-                    dueNow = await PlanAsync(alert, message.ChangeId, now, cancellationToken);
-                    break;
-                case AlertChanges.Reopened:
-                case AlertChanges.SeverityRaised:
-                    // The new plan replaces the old one; otherwise delayed steps of the old severity would also fire.
-                    await CancelOpenAsync(alert.Id, $"superseded by {message.Change}", now, cancellationToken);
-                    dueNow = await PlanAsync(alert, message.ChangeId, now, cancellationToken);
-                    break;
-                case AlertChanges.Acked:
-                case AlertChanges.Resolved:
-                    await CancelOpenAsync(alert.Id, message.Change, now, cancellationToken);
-                    break;
-                case AlertChanges.CountThreshold:
-                    // Counter thresholds only move the UI counter; they never disturb anyone.
-                    break;
-                default:
-                    _logger.LogWarning("Alert change {ChangeId} has unknown kind {Change}; ignoring it", message.ChangeId, message.Change);
-                    break;
-            }
-        }
-        else
-        {
-            _logger.LogInformation("Alert change {ChangeId} is older than the alert copy; ignoring it", message.ChangeId);
+            // Held until the save at the end: the "already notified" read below then sees every committed plan of these groups.
+            await _notifications.LockGroupsAsync(groupKeys, cancellationToken);
+            batch.Existing = await _notifications.GetExistingIdsAsync(
+                plans.SelectMany(plan => plan.Entries.Select(entry => entry.Id.Value)).ToList(),
+                cancellationToken);
+            batch.Notified.AddRange(await _notifications.GetNotifiedAsync(
+                plans.SelectMany(plan => plan.Entries.Select(entry => entry.Recipient.UserId)).Distinct().ToList(),
+                groupKeys,
+                now.AddSeconds(-plans.Max(plan => plan.WindowSeconds)),
+                cancellationToken));
         }
 
-        await _processedChanges.AddAsync(ProcessedChange.Create(message.ChangeId, now), cancellationToken);
+        var cancelling = changes
+            .Where(change => change.Message.Change is AlertChanges.Reopened or AlertChanges.SeverityRaised
+                or AlertChanges.Acked or AlertChanges.Resolved)
+            .Select(change => change.Alert.Id)
+            .Distinct()
+            .ToList();
+        batch.Open.AddRange(await _notifications.GetOpenByAlertsAsync(cancelling, cancellationToken));
+
+        var dueNow = false;
+        foreach (var (message, alert) in changes)
+        {
+            if (await ApplyToCopyAsync(alert, message, copies, cancellationToken))
+            {
+                switch (message.Change)
+                {
+                    case AlertChanges.Opened:
+                        dueNow |= await PlanAsync(alert, drafts[message.ChangeId], batch, now, cancellationToken);
+                        break;
+                    case AlertChanges.Reopened:
+                    case AlertChanges.SeverityRaised:
+                        // The new plan replaces the old one; otherwise delayed steps of the old severity would also fire.
+                        await CancelOpenAsync(alert.Id, $"superseded by {message.Change}", batch, now, cancellationToken);
+                        dueNow |= await PlanAsync(alert, drafts[message.ChangeId], batch, now, cancellationToken);
+                        break;
+                    case AlertChanges.Acked:
+                    case AlertChanges.Resolved:
+                        await CancelOpenAsync(alert.Id, message.Change, batch, now, cancellationToken);
+                        break;
+                    case AlertChanges.CountThreshold:
+                        // Counter thresholds only move the UI counter; they never disturb anyone.
+                        break;
+                    default:
+                        _logger.LogWarning("Alert change {ChangeId} has unknown kind {Change}; ignoring it", message.ChangeId, message.Change);
+                        break;
+                }
+            }
+            else
+            {
+                _logger.LogInformation("Alert change {ChangeId} is older than the alert copy; ignoring it", message.ChangeId);
+            }
+
+            await _processedChanges.AddAsync(ProcessedChange.Create(message.ChangeId, now), cancellationToken);
+        }
+
         await _processedChanges.SaveChangesAsync(cancellationToken);
 
         // Only after the commit: the delivery loop must be able to claim what it is woken for.
@@ -117,17 +162,55 @@ public sealed class AlertChangeService : IAlertChangeService
         }
     }
 
-    private async Task<bool> ApplyToCopyAsync(AlertDto alert, AlertChangeMessage message, CancellationToken cancellationToken)
+    // Valid records not seen before, in order: invalid ones are logged and skipped, repeats within the batch
+    // and changes already processed (a redelivery) are dropped.
+    private async Task<List<(AlertChangeMessage Message, AlertDto Alert)>> ReadNewChangesAsync(
+        IReadOnlyList<AlertChangeMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        var changes = new List<(AlertChangeMessage Message, AlertDto Alert)>();
+        var seen = new HashSet<string>();
+        foreach (var message in messages)
+        {
+            try
+            {
+                var alert = ReadAlert(message);
+                if (seen.Add(message.ChangeId))
+                {
+                    changes.Add((message, alert));
+                }
+            }
+            catch (InvalidAlertChangeException exception)
+            {
+                _logger.LogError(exception, "Skipping an invalid alerts.changes record");
+            }
+        }
+
+        var processed = await _processedChanges.GetExistingAsync(seen, cancellationToken);
+        if (processed.Count > 0)
+        {
+            _logger.LogDebug("Skipping {Count} alert changes that were already processed (redelivery)", processed.Count);
+        }
+
+        return changes.Where(change => !processed.Contains(change.Message.ChangeId)).ToList();
+    }
+
+    private async Task<bool> ApplyToCopyAsync(
+        AlertDto alert,
+        AlertChangeMessage message,
+        Dictionary<string, Alert> copies,
+        CancellationToken cancellationToken)
     {
         var status = Enum.TryParse<AlertStatus>(alert.Status, ignoreCase: true, out var parsed) ? parsed : AlertStatus.Open;
         var severity = Severity.ParseOrDefault(alert.Severity).Name;
         var changedAt = Time.ToUtc(message.At);
         var body = message.Alert.GetRawText();
 
-        var copy = await _alerts.FindAsync(alert.Id, cancellationToken);
-        if (copy is null)
+        if (!copies.TryGetValue(alert.Id, out var copy))
         {
-            await _alerts.AddAsync(Alert.Create(alert.Id, alert.RuleId, alert.IncidentId, status, severity, body, changedAt), cancellationToken);
+            copy = Alert.Create(alert.Id, alert.RuleId, alert.IncidentId, status, severity, body, changedAt);
+            copies[alert.Id] = copy;
+            await _alerts.AddAsync(copy, cancellationToken);
 
             return true;
         }
@@ -135,15 +218,14 @@ public sealed class AlertChangeService : IAlertChangeService
         return copy.Apply(status, severity, alert.IncidentId, body, changedAt);
     }
 
-    // Returns true when at least one planned row is due at once.
-    private async Task<bool> PlanAsync(AlertDto alert, string changeId, DateTime now, CancellationToken cancellationToken)
+    // Who gets what for one change, from the configuration alone; null (with the reason logged) when nobody is notified.
+    private PlanDraft? Draft(AlertDto alert, string changeId, ConfigSnapshot config, DateTime now)
     {
-        var config = await _configCache.GetAsync(_config, cancellationToken);
         if (alert.RuleId is null || !config.Rules.TryGetValue(alert.RuleId, out var rule) || !rule.Rule.Enabled)
         {
             _logger.LogWarning("Alert {AlertId} has no enabled rule copy ({RuleId}); nobody is notified", alert.Id, alert.RuleId);
 
-            return false;
+            return null;
         }
 
         var route = ToRoute(rule.Body?.Route);
@@ -153,41 +235,47 @@ public sealed class AlertChangeService : IAlertChangeService
         {
             _logger.LogWarning("Rule {RuleId} routes alert {AlertId} to nobody known yet; nobody is notified", rule.Rule.Id, alert.Id);
 
-            return false;
+            return null;
         }
 
         var runbook = config.FindActiveRunbook(alert.RunbookId ?? rule.Body?.RunbookId);
-        var content = BuildContent(alert, severity, runbook);
-        var groupKey = alert.IncidentId ?? ReadEventId(alert) ?? alert.Id;
-        var windowSeconds = rule.Body?.WindowS is > 0 ? rule.Body.WindowS.Value : DefaultWindowSeconds;
         var policy = new EscalationPolicy(
             TimeSpan.FromMinutes(_escalation.PushDelayMinutes),
             TimeSpan.FromMinutes(_escalation.OnCallCallDelayMinutes));
-
-        var plan = recipients
-            .SelectMany(recipient => _ladder.Plan(recipient, severity, policy, now).Select(planned => (
-                Recipient: recipient,
-                Planned: planned,
-                Id: NotificationId.For(alert.Id, recipient.UserId, planned.Channel.Name, changeId))))
+        var entries = recipients
+            .SelectMany(recipient => _ladder.Plan(recipient, severity, policy, now).Select(planned => new PlanEntry(
+                recipient,
+                planned,
+                NotificationId.For(alert.Id, recipient.UserId, planned.Channel.Name, changeId))))
             .ToList();
 
-        // Held until the save at the end of HandleAsync: the "already notified" read below then sees every
-        // committed plan of this group.
-        await _notifications.LockGroupAsync(groupKey, cancellationToken);
+        return new PlanDraft(
+            changeId,
+            alert.IncidentId ?? ReadEventId(alert) ?? alert.Id,
+            rule.Body?.WindowS is > 0 ? rule.Body.WindowS.Value : DefaultWindowSeconds,
+            BuildContent(alert, severity, runbook),
+            entries);
+    }
 
-        // Two queries for the whole plan instead of two per row.
-        var existing = await _notifications.GetExistingIdsAsync(plan.Select(entry => entry.Id.Value).ToList(), cancellationToken);
-        var alreadyNotified = await _notifications.GetNotifiedUsersAsync(
-            recipients.Select(recipient => recipient.UserId).ToList(),
-            groupKey,
-            alert.Id,
-            now.AddSeconds(-windowSeconds),
-            cancellationToken);
+    // Returns true when at least one planned row is due at once.
+    private async Task<bool> PlanAsync(AlertDto alert, PlanDraft? draft, BatchState batch, DateTime now, CancellationToken cancellationToken)
+    {
+        if (draft is null)
+        {
+            return false;
+        }
+
+        // Rows committed before this batch and rows planned earlier in it both count.
+        var since = now.AddSeconds(-draft.WindowSeconds);
+        var alreadyNotified = batch.Notified
+            .Where(entry => entry.GroupKey == draft.GroupKey && entry.AlertId != alert.Id && entry.CreatedAt >= since)
+            .Select(entry => entry.UserId)
+            .ToHashSet();
 
         var dueNow = false;
-        foreach (var (recipient, planned, id) in plan)
+        foreach (var (recipient, planned, id) in draft.Entries)
         {
-            if (existing.Contains(id.Value))
+            if (batch.Existing.Contains(id.Value))
             {
                 continue;
             }
@@ -196,13 +284,13 @@ public sealed class AlertChangeService : IAlertChangeService
                 id,
                 alert.Id,
                 alert.IncidentId,
-                groupKey,
+                draft.GroupKey,
                 recipient,
                 planned.Channel,
-                changeId,
+                draft.ChangeId,
                 planned.Step,
                 $"{recipient.Why}; {planned.Reason}",
-                content,
+                draft.Content,
                 planned.SendAt,
                 now);
 
@@ -212,20 +300,26 @@ public sealed class AlertChangeService : IAlertChangeService
                 notification.Suppress("already notified about this incident", now);
                 await _timeline.AppendAsync(notification, AlertEventKinds.NotificationSuppressed, now, cancellationToken);
             }
-            else if (planned.SendAt <= now)
+            else
             {
-                dueNow = true;
+                dueNow |= planned.SendAt <= now;
+                if (planned.Channel != Channel.Ui)
+                {
+                    batch.Notified.Add(new NotifiedEntry(draft.GroupKey, recipient.UserId, alert.Id, now));
+                }
             }
 
+            batch.Open.Add(notification);
             await _notifications.AddAsync(notification, cancellationToken);
         }
 
         return dueNow;
     }
 
-    private async Task CancelOpenAsync(string alertId, string reason, DateTime now, CancellationToken cancellationToken)
+    // Covers rows committed before this batch and rows planned earlier in it.
+    private async Task CancelOpenAsync(string alertId, string reason, BatchState batch, DateTime now, CancellationToken cancellationToken)
     {
-        foreach (var notification in await _notifications.GetOpenByAlertAsync(alertId, cancellationToken))
+        foreach (var notification in batch.Open.Where(notification => notification.AlertId == alertId && notification.IsOpen))
         {
             notification.Cancel($"suppressed by {reason}", now);
             await _timeline.AppendAsync(notification, AlertEventKinds.NotificationSuppressed, now, cancellationToken);
@@ -314,4 +408,24 @@ public sealed class AlertChangeService : IAlertChangeService
 
     private static string FieldText(JsonElement value) =>
         value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : value.GetRawText();
+
+    private sealed record PlanEntry(Recipient Recipient, PlannedDelivery Planned, NotificationId Id);
+
+    private sealed record PlanDraft(
+        string ChangeId,
+        string GroupKey,
+        int WindowSeconds,
+        NotificationContent Content,
+        IReadOnlyList<PlanEntry> Entries);
+
+    // What one batch knows beyond its own records: read once up front, then extended as records are applied.
+    private sealed class BatchState
+    {
+        public IReadOnlySet<string> Existing { get; set; } = new HashSet<string>();
+
+        public List<NotifiedEntry> Notified { get; } = [];
+
+        // Candidates for cancellation; Cancel only touches the ones still open.
+        public List<Notification> Open { get; } = [];
+    }
 }

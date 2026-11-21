@@ -15,6 +15,20 @@ Each alert is critical and goes to 3 people × [ui, email, sms] = 9 notification
 
 Latency is produced → sent, all channels. In a burst it is mostly queueing time behind the earlier alerts.
 
+### Batch planning (21-11, later)
+`alerts.changes` is now consumed up to 100 fetched records at a time, one transaction and one query per lookup
+per batch (was ~9 round trips and a commit per alert); EF savepoints are off. Same machine, fresh stack, warmed up.
+
+| Scenario | Throughput | produced → planned p50 / p99 | produced → sent p50 / p95 / p99 |
+|---|---|---|---|
+| Burst, 1,000 alerts × 1 notification (ui) | planning ~1,100 alerts/s (was 137) | 442 ms / 912 ms | 768 ms / 1.3 s / 1.4 s |
+| Burst, 1,000 alerts × 9 notifications | planning ~245 alerts/s (was 70); sent 590/s | 2.2 s / 4.1 s | 9.3 s / 14.7 s / 15.1 s |
+| Steady, 10 alerts/s × 9 notifications | 90/s (keeps up) | 62 ms / 68 ms | 75 ms / 83 ms / 90 ms |
+
+Planning is no longer the limit: in the 9-notification burst the rows now wait in front of delivery
+(planned → sent p50 7 s), so end-to-end throughput did not move. Steady planning has an unexplained fixed ~60 ms
+(was 7 ms in the run above); not investigated yet.
+
 ## What changed
 1. Rows due now wake the delivery loop right after the commit (no 500 ms poll wait).
 2. Sends run in parallel (16 per replica); per-person rate counters are row-locked, so the push limit stays exact.
@@ -26,11 +40,10 @@ Latency is produced → sent, all channels. In a burst it is mostly queueing tim
 7. A cleanup loop deletes old processed outbox records, processed change ids and finished notifications.
 
 ## Where the limit is now
-- Delivery is no longer the bottleneck: in the burst, planned → sent went from p50 12.6 s to 26 ms.
-- Planning (consuming `alerts.changes`) caps at ~65–75 alerts/s on this machine, and 3 replicas did not raise it
-  (partitions were split 2/2/2). During the burst each replica used ~2 CPUs and Postgres ~3.6 CPUs, with
-  backends waiting on `WALWrite`; turning off `synchronous_commit` did not help (583/s). The likely limit is
-  the single shared Postgres and per-statement overhead, not fsync. Not investigated further.
+- With batch planning, delivery is the bottleneck again (~600 notifications/s): each notification costs 2–3
+  commits (claim, status update + outbox insert, outbox mark) on the one Postgres, whose backends mostly wait on
+  `WALWrite` / `WALSync`. 3 replicas did not raise throughput before batching (622 → 637/s), consistent with the
+  shared database being the limit. Next: fewer commits per notification, outbox marked in one statement per batch.
 - Retry still works with parallel sends: a 10 s gateway outage delayed 5 SMS by ~14 s; all were sent (up to 4 attempts).
 
 ## Reproduce
