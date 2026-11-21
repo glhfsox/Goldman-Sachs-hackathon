@@ -1,0 +1,37 @@
+{
+  "id": "pricing-logs",
+  "status": "active",
+  "origin": "seed",
+  "priority": 50,
+  "match": {
+    "all": [
+      {
+        "field": "raw.logger",
+        "op": "glob",
+        "value": "pricing-engine*"
+      }
+    ]
+  },
+  "fields": {
+    "type": {
+      "const": "log"
+    },
+    "service": {
+      "path": "logger"
+    },
+    "severity": {
+      "path": "level"
+    },
+    "env": {
+      "const": "prod"
+    },
+    "ts": {
+      "path": "time",
+      "format": "epoch_s"
+    }
+  },
+  "severity_map": {
+    "ERR": "error",
+    "FATAL": "critical"
+  }
+}

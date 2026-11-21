@@ -1,0 +1,42 @@
+{
+  "id": "trade-rejected-v1",
+  "status": "active",
+  "origin": "llm",
+  "priority": 100,
+  "match": {
+    "all": [
+      {
+        "field": "raw.meta.schema",
+        "op": "glob",
+        "value": "trade.rejected*"
+      }
+    ]
+  },
+  "fields": {
+    "type": {
+      "path": "meta.schema"
+    },
+    "service": {
+      "path": "meta.producer"
+    },
+    "severity": {
+      "const": "error"
+    },
+    "env": {
+      "const": "prod"
+    },
+    "ts": {
+      "path": "meta.ts",
+      "format": "epoch_ms"
+    }
+  },
+  "severity_map": {
+    "P1": "critical",
+    "ERROR": "error",
+    "WARN": "warning"
+  },
+  "dedup_fields": [
+    "payload.desk",
+    "payload.reason"
+  ]
+}

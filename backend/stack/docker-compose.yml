@@ -1,0 +1,15 @@
+# Full-stack additions, included by the root docker-compose.yml. Not meant to run alone.
+services:
+  # One-shot: loads the brief's mappings, rules and runbook through the api, then exits. Safe to run again:
+  #   docker compose run --rm seed
+  seed:
+    image: curlimages/curl:8.17.0
+    entrypoint: ["sh", "/seed/seed.sh"]
+    environment:
+      API_URL: http://api:8000/api
+    volumes:
+      - ./seed:/seed:ro
+    depends_on:
+      api:
+        condition: service_started
+    restart: "no"
