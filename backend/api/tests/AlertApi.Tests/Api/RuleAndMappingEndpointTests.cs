@@ -40,10 +40,11 @@ public sealed class RuleAndMappingEndpointTests : IClassFixture<PostgresFixture>
 
         var created = await client.PostAsync("/api/rules", Json(Rule));
         var rates = await client.GetFromJsonAsync<JsonElement>("/api/rules?team=rates");
-        var other = await client.GetFromJsonAsync<JsonElement>("/api/rules?team=pricing");
+        var other = await client.GetFromJsonAsync<JsonElement>("/api/rules?team=ghost");
 
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        Assert.Equal("rates-large", Assert.Single(rates.EnumerateArray()).GetProperty("id").GetString());
+        // The seed already holds the rates team's example rule.
+        Assert.Equal(["rates-large", "rates-large-rejections"], rates.EnumerateArray().Select(rule => rule.GetProperty("id").GetString()!).Order());
         Assert.Equal(0, other.GetArrayLength());
         await using var scope = factory.Services.CreateAsyncScope();
         var record = await scope.ServiceProvider.GetRequiredService<ApiDbContext>().Outbox
@@ -120,7 +121,7 @@ public sealed class RuleAndMappingEndpointTests : IClassFixture<PostgresFixture>
         Assert.Equal(HttpStatusCode.OK, replaced.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
         Assert.Equal("invalid_mapping", (await invalid.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
-        Assert.Equal("disabled", Assert.Single(list.EnumerateArray()).GetProperty("status").GetString());
+        Assert.Equal("disabled", Assert.Single(list.EnumerateArray(), mapping => mapping.GetProperty("id").GetString() == "trade-v1").GetProperty("status").GetString());
     }
 
     private static StringContent Json(string json)
