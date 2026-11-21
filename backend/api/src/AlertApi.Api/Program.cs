@@ -53,6 +53,8 @@ builder.Services.AddScoped<IPreferencesRepository, PreferencesRepository>();
 builder.Services.AddScoped<IPreferencesService, PreferencesService>();
 builder.Services.AddScoped<IRunbookRepository, RunbookRepository>();
 builder.Services.AddScoped<IRunbookService, RunbookService>();
+builder.Services.AddScoped<IProposalRepository, ProposalRepository>();
+builder.Services.AddScoped<IProposalService, ProposalService>();
 builder.Services.AddSingleton(new RedisOptions { Url = redisUrl });
 builder.Services.AddSingleton<RedisConnection>();
 builder.Services.AddSingleton<IUiPublisher, RedisUiPublisher>();
@@ -112,6 +114,7 @@ app.MapUserEndpoints();
 app.MapAlertEndpoints();
 app.MapSchemaSampleEndpoints();
 app.MapRunbookEndpoints();
+app.MapProposalEndpoints();
 app.MapLiveEndpoints();
 
 app.Run();

@@ -61,9 +61,12 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `POST /runbooks/{id}/accept?version=` | none, `X-User` of a person; `version` = the version the person reviewed (required, `422` without it) | `Runbook` with `accepted_by` and `accepted_at`. `403` for a service actor or an unknown user, `409` when the runbook is not `active` or `version` is not the current one |
 | `POST /alerts/{id}/actions` | `{runbook_id, step_index}` | `ActionRun`: `running`, or `waiting_approval` when the step needs approval |
 | `POST /actions/{id}/approve`, `POST /actions/{id}/reject` | | `ActionRun` |
-| `POST /alerts/{id}/proposals` | `{kind, body}` | `Proposal` |
-| `GET /proposals?status=open` | | `[Proposal]` |
-| `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal` |
+| `POST /alerts/{id}/proposals` | `{kind, body}` with `X-User` (a person or `ai-worker`) | `Proposal`, `201`. An identical open proposal (same alert, kind and body) is returned with `200` instead of a second one. `422 invalid_proposal` (one `details` entry per wrong path, each starting with `body.` or `kind`), `404` for an unknown alert or an `X-User` that is neither a user nor `ai-worker` |
+| `GET /proposals?status=&limit=` | | `[Proposal]`, newest first; `status` is `open`, `accepted` or `rejected`; `limit` defaults to 50, at most 200 |
+| `GET /proposals/{id}` | | `Proposal`, `404` when unknown |
+| `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal`. Only a person: `403` for `ai-worker` or an unknown `X-User`. `409` when the proposal is not `open` |
+
+A `Proposal` is `{id, alert_id, kind, body, author, status, decided_by, created_at, decided_at}`; `kind` is `threshold`, `template`, `runbook`, `rule_severity` or `runbook_start`. Accepting applies the proposal: `rule_severity` sets the rule's `severity` (published on `config.changes`; `409` when the rule no longer exists); `runbook` saves `body.canonical` as a new runbook that is `active` and accepted by that person, with an id made from `body.title` (the id inside `canonical` is replaced); `threshold` and `template` only change the status, a person applies them; `runbook_start` answers `409` until the run model exists and a rule can store the start mode. Creating and deciding add the timeline rows `proposal_created` and `proposal_decided`.
 
 A `Runbook` is `{id, team_id, title, format, source, canonical, status, version, accepted_by, accepted_at, updated_at}`;
 `canonical` is `null` on a draft.
