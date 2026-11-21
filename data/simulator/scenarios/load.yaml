@@ -1,0 +1,11 @@
+name: load
+description: Load test (AC-9.2) - about 1000 msg/s, 90% over Kafka, from pre-built pools. Scale with --rate.
+seed: 3
+phases:
+  - name: load
+    duration_s: null
+    streams:
+      - {schema: workflow_event, rate: 400, pool: 2000}
+      - {schema: trade_event, rate: 500, pool: 2000}
+      - {schema: metric_alert, rate: 50, pool: 500}
+      - {schema: log_record, rate: 50, pool: 500}

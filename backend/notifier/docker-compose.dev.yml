@@ -1,0 +1,54 @@
+# Dev and demo stack for Notifier alone: the shared Kafka, its own database, the mocks, the worker.
+#   docker compose -f backend/notifier/docker-compose.dev.yml up -d --build
+# Do not run the standalone backend/kafka compose at the same time: both publish host port 9092.
+name: notifier-dev
+
+include:
+  - path: ../kafka/docker-compose.yml
+
+services:
+  notifier-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: alerts
+      POSTGRES_PASSWORD: alerts
+      POSTGRES_DB: notifier
+    ports: ["5435:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alerts -d notifier"]
+      interval: 2s
+      retries: 30
+
+  mailhog:
+    image: mailhog/mailhog
+    ports: ["1025:1025", "8025:8025"]
+
+  mock-gateway:
+    build:
+      context: .
+      args:
+        PROJECT: Notifier.MockGateway
+    environment:
+      ASPNETCORE_URLS: http://+:8002
+    ports: ["8002:8002"]
+
+  notifier:
+    build:
+      context: .
+      args:
+        PROJECT: Notifier.Worker
+    depends_on:
+      notifier-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    environment:
+      DOTNET_ENVIRONMENT: Development
+      DATABASE_URL: postgres://alerts:alerts@notifier-db:5432/notifier
+      KAFKA_BROKERS: kafka:9092
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+      SMS_GATEWAY_URL: http://mock-gateway:8002/sms
+      CALL_GATEWAY_URL: http://mock-gateway:8002/call
+      PUBLIC_BASE_URL: http://localhost:3000

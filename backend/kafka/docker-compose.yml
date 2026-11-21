@@ -1,0 +1,54 @@
+# Shared Kafka cluster for all backend services (one broker, KRaft, local use only).
+# Run alone:   docker compose up -d      (from backend/kafka)
+# Use from your own compose file:
+#   include:
+#     - path: ../kafka/docker-compose.yml
+# Then wait for topics:  depends_on: { kafka-init: { condition: service_completed_successfully } }
+# Addresses: inside compose `kafka:9092`; from the host `localhost:9092`.
+name: kafka
+
+services:
+  kafka:
+    image: apache/kafka:4.3.1
+    ports:
+      - "${KAFKA_HOST_PORT:-9092}:9094"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # INTERNAL: other containers. HOST: your machine (container port 9094, published as 9092).
+      KAFKA_LISTENERS: INTERNAL://:9092,HOST://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,HOST://localhost:${KAFKA_HOST_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Topics are created explicitly by kafka-init, never by accident.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # One broker: every internal topic needs replication factor 1.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9092"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  # Creates the topics from contracts/services.md, then exits. Safe to run again.
+  kafka-init:
+    image: apache/kafka:4.3.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./create-topics.sh:/create-topics.sh:ro
+    entrypoint: ["bash", "/create-topics.sh"]
+    restart: "no"
+
+volumes:
+  kafka-data:

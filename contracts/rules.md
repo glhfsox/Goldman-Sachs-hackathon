@@ -37,13 +37,15 @@ A node is a group `{"all": [node, ...]}`, a group `{"any": [node, ...]}`, or a l
 ## 3. Schema mapping (table `mappings`)
 
 Turns a raw payload into the envelope. Mappings are tried by `priority`, highest first; the first
-whose `match` is true wins. `match` sees only `source` and `raw.*`.
+whose `match` is true wins. `match` sees only `source` and `raw.*`. A mapping written by the AI worker gets
+priority 10, below seeded and human ones, so it can never take events from an existing mapping; the
+example below is a seeded one.
 
 ```json
 {
   "id": "trade-rejected-v1",
   "status": "active",
-  "origin": "llm",
+  "origin": "seed",
   "priority": 100,
   "match": {"all": [{"field": "raw.meta.schema", "op": "glob", "value": "trade.rejected*"}]},
   "fields": {
@@ -67,8 +69,9 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
 - Onboarding a new schema: the processor publishes one sample per unknown shape to Kafka `schema.samples`
   ([events.md](events.md) §8); the AI worker asks Claude for a mapping object and saves it through the API as `active` if every `path` resolves on
   the sample, the severity is on the scale and `ts` parses. Otherwise the sample is marked `failed` and
-  a person writes the mapping in the UI. Only events that arrive after the mapping is active use it;
-  earlier ones stay unmapped.
+  a person writes the mapping in the UI. Events of that schema that arrived earlier are not lost: the
+  processor parks them (up to 1,000 per schema, for 1 hour) and runs them through the mapping and the
+  rules as soon as a mapping for them becomes active.
 
 ## 4. Rule (table `rules`)
 
@@ -99,18 +102,26 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
 - `alert_key`: paths whose values, with the rule id, identify one alert. Dedup and grouping are the same
   mechanism: every matching event with the same key increments that alert's `count`. Default when omitted:
   `["type", "service"]` plus the envelope's `dedup_hints`.
+- `severity` (optional): `info`, `warning`, `error` or `critical`. When set, every alert of this rule has
+  exactly this severity, lower or higher than the event's; when absent or null, the alert takes the event's
+  severity and keeps the highest seen. `when` and `alert.sample_event` still see the event's severity.
+  Changed while an alert is open: a higher value raises it on the next event (`severity_raised`); a lower
+  one is applied when the alert is next opened or reopened, never to an open alert. Removing `severity`
+  leaves the alert's current severity until it is opened anew after its reopen window.
 - `window_s` (default 300): the alert stays open for events with its key until none has arrived for
   `window_s`; then the processor auto-resolves it. An event within another `window_s` after that reopens it.
 - `route.recipients`: `{"team": id}` (all members), `{"team": id, "on_call": true}` or `{"user": id}`.
 - `route.channels`: any of `ui`, `email`, `sms`, `call`. When omitted, each recipient's own preferences
   decide. Quiet hours and the per-hour limit from preferences always apply.
 - `present.color`: `red`, `orange`, `yellow`, `blue` or `grey`. Templates use `{{path}}`.
+- `present` is optional. A rule without `present.title` gets its `name` as the alert title, or
+  `{{type}} · {{service}}` when it has no name, so no channel ever shows a blank title.
 - A person matched by several rules for one incident gets one message.
 - An invalid rule is rejected by the API with `422` and never reaches the processor (see [api.md](api.md)).
 - The processor reloads rules and mappings within 5 s of a change (they arrive on Kafka `config.changes`,
   [events.md](events.md) §6).
 
-The other three example rules from the brief, as `when` / `alert_key` / `route` / `present`:
+The other three example rules from the brief, as `when` / `severity` / `alert_key` / `route` / `present`:
 
 ```json
 {"id": "pricing-engine-errors", "team_id": "pricing",
@@ -124,6 +135,7 @@ The other three example rules from the brief, as `when` / `alert_key` / `route` 
  "when": {"all": [{"field": "type", "op": "glob", "value": "trade.rejected*"},
                   {"field": "payload.desk", "op": "eq", "value": "rates"},
                   {"field": "payload.notional", "op": "gt", "value": 10000000}]},
+ "severity": "critical",
  "route": {"recipients": [{"team": "rates"}], "channels": ["email", "ui"]},
  "present": {"title": "Trade {{payload.tradeId}} rejected: {{payload.reason}} ({{payload.notional}} {{payload.currency}})"}}
 

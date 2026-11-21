@@ -1,0 +1,25 @@
+{
+  "id": "anna-payments-critical",
+  "team_id": "payments",
+  "when": {
+    "all": [
+      {
+        "field": "service",
+        "op": "eq",
+        "value": "payments-api"
+      },
+      {
+        "field": "severity",
+        "op": "eq",
+        "value": "critical"
+      }
+    ]
+  },
+  "route": {
+    "recipients": [
+      {
+        "user": "anna"
+      }
+    ]
+  }
+}

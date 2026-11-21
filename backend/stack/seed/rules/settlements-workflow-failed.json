@@ -1,0 +1,54 @@
+{
+  "id": "settlements-workflow-failed",
+  "team_id": "settlements",
+  "name": "Order settlement failed in prod",
+  "enabled": true,
+  "when": {
+    "all": [
+      {
+        "field": "type",
+        "op": "eq",
+        "value": "WORKFLOW_FAILED"
+      },
+      {
+        "field": "raw.workflowName",
+        "op": "eq",
+        "value": "order-settlement"
+      },
+      {
+        "field": "env",
+        "op": "eq",
+        "value": "prod"
+      }
+    ]
+  },
+  "alert_key": [
+    "raw.workflowName",
+    "raw.error.code"
+  ],
+  "window_s": 300,
+  "route": {
+    "recipients": [
+      {
+        "team": "settlements",
+        "on_call": true
+      }
+    ],
+    "channels": [
+      "call",
+      "sms",
+      "ui"
+    ]
+  },
+  "present": {
+    "title": "{{workflowName}} failed at step {{step}}",
+    "body": "{{error.message}}",
+    "fields": [
+      "step",
+      "error.code",
+      "error.message"
+    ],
+    "color": "red"
+  },
+  "runbook_id": "settlement-retry"
+}

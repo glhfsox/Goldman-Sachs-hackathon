@@ -15,7 +15,8 @@ Everything in the repo is in English: code, comments, docs, `STATE.md` and `HAND
 | `ai/` | glhfsox | models, prompts, inference, eval |
 | `data/` | glhfsox, spdsslg | collection, cleaning, datasets, features |
 | `backend/` | SviatoslavShpylovyi, oshuptar | API, DB, integrations |
-| `backend/ai-worker/` | glhfsox | AI worker service (schema mappings, runbook conversion) |
+| `backend/ai-worker/` | glhfsox, spdsslg | AI worker service (schema mappings, runbook conversion) |
+| `backend/processor/` | glhfsox | Processor service (mappings, rules, dedup, alert state) |
 | `frontend/` | everyone | UI |
 | `presentation/` | oshuptar | slides, demo materials |
 | `contracts/ai/`, `contracts/data/`, `contracts/backend/` | owner of that zone | interfaces the zone provides; files directly in `contracts/` are shared |
@@ -36,10 +37,18 @@ Everything where zones touch: API endpoints, dataset formats, model input/output
 - Changed a contract? Add an entry to your section of `STATE.md` in the same PR (the gate enforces this).
 - Breaking change (removed or renamed field or endpoint, changed type or meaning, new required field): your operator agrees it with the consumers first and mentions them in the PR. No approval is required to merge.
 
+## Kafka events (`contracts/events.md`)
+All backend services share one Kafka cluster ([contracts/services.md](contracts/services.md)). Records are an interface between zones, so they are documented like any contract.
+- Producing events to a topic? Document the record in `contracts/events.md`: topic, key, fields with types, and an example. Do this in the same PR that first produces it.
+- Consuming events from another service? Read that record's schema in `contracts/events.md` first, and map its fields to yours explicitly. Never guess a field.
+- Changing a record (field added, removed, renamed, type or meaning changed)? Update `contracts/events.md` in the same PR. The code is the source of truth: the docs must match it, never the other way round.
+- Breaking record changes follow the rules in "Contracts" above.
+- Kafka delivers at least once, so a record can arrive twice. Make processing idempotent wherever a repeat would do harm (alerts, notifications and deliveries, runbook actions, anything that sends). Every record carries a stable id (e.g. `event_id`); the consumer or command handler stores the processed id (unique constraint, or Redis `SET NX`) in the same transaction as its effect, so a replay changes nothing. Skip it where a repeat is harmless. Document the id field in `contracts/events.md`.
+
 ## Database schemas (`contracts/schemas/`)
 Every service has its own Postgres and is the only one that connects to it; the Kafka cluster is shared. `contracts/schemas/<service>.md` describes that service's tables: columns, types, keys, and for a copied table where the data comes from. Overview and shared rules: `contracts/storage.md`.
 - Two services exchange data (a Kafka record, a REST call, a table one of them copies)? Read both services' schema files before writing code, and map the fields from one to the other explicitly. The same thing can have a different name, type or nullability on each side; never assume the other side's columns.
-- Changed a schema, or added or ran a migration of any kind (new table or column, type change, index, rename, backfill)? In the same PR change the migration in `backend/<service>/migrations/` and `contracts/schemas/<service>.md`. Never one without the other: the file must always describe the database as the migrations leave it.
+- Changed a schema, or added or ran a migration of any kind (new table or column, type change, index, rename, backfill)? In the same PR change the migration and `contracts/schemas/<service>.md`. Each service decides where its own migrations live. Never one without the other: the file must always describe the database as the migrations leave it.
 - The changed column travels to another service? Update the record format in `contracts/events.md` in that PR too, and check the schema file of every service that copies it.
 - Never read or write another service's database, not even in tests or scripts. Need its data? Consume the topic, or ask its owner for a new record.
 
@@ -81,7 +90,7 @@ Lives at the repo root, one per person, never committed. The agent maintains it.
 - No destructive git operations (`reset --hard`, `push --force` to shared branches, deleting others' branches) unless your operator explicitly asks.
 
 ## Checks and tests
-- Every zone with code has `<zone>/check.sh`: fast checks (lint + unit tests), about 60 s max, no model training. The owner decides what goes in it. It runs from the zone folder.
+- Every zone with code has `<zone>/check.sh`: fast checks (lint + unit tests), about 60 s max, no model training. The owner decides what goes in it. It runs from the zone folder. A service has its own: `backend/<service>/check.sh` runs, from that folder, when a file under it changes.
 - `check.sh` sets up its own environment idempotently and must pass on a fresh clone and on a bare `ubuntu-latest` CI runner (python3, node, npm preinstalled; no uv). Examples: `uv run pytest` after `command -v uv || pip install uv`, `[ -d node_modules ] || npm ci`. Installing dependencies may use the network; the tests themselves must not.
 - Test what breaks neighbours (contract conformance) and critical logic. Don't chase coverage.
 - `python3 scripts/team.py check` runs the checks of zones changed in the working tree. The Claude hook runs them before the agent ends its turn and won't let it finish on red.

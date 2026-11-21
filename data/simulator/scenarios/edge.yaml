@@ -1,0 +1,20 @@
+name: edge
+description: Every deliberate edge case of contracts/data/sources.md §4.5, a few times each, in 20 seconds.
+seed: 5
+phases:
+  - name: edge cases
+    duration_s: 20
+    streams:
+      - {schema: metric_alert, count: 3, source: no-such-source}           # unknown id: expect 404
+      - {schema: metric_alert, count: 3, corrupt: true}                    # invalid JSON over HTTP
+      - {schema: workflow_event, count: 3, corrupt: true}                  # invalid JSON over Kafka
+      - {schema: log_record, count: 3, text: true}                         # raw text line
+      - {schema: k8s_event, count: 3}                                      # never-seen schema
+      - schema: log_record                                                 # non-ASCII text
+        count: 3
+        text: false
+        overrides: {msg: "Preis für EUR/CHF über Limit: 1,2 Mio. € — 日本円の価格が古い"}
+      - schema: trade_event                                                # non-ASCII over Kafka
+        count: 3
+        overrides: {payload.reason: "STALE_PRICE — prix périmé"}
+      - {schema: workflow_event, count: 50, pool: 1}                       # the very same event, 50 times

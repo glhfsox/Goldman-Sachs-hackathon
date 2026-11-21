@@ -1,0 +1,67 @@
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
+
+using AlertApi.Application.Exceptions;
+
+namespace AlertApi.Api.Infrastructure;
+
+public sealed class GlobalExceptionHandler : IExceptionHandler
+{
+    private readonly IHostEnvironment _environment;
+    private readonly ILogger<GlobalExceptionHandler> _logger;
+
+    public GlobalExceptionHandler(
+        IHostEnvironment environment,
+        ILogger<GlobalExceptionHandler> logger)
+    {
+        _environment = environment;
+        _logger = logger;
+    }
+
+    public async ValueTask<bool> TryHandleAsync(
+        HttpContext httpContext,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        ProblemDetails problem;
+
+        if (exception is AppException appException)
+        {
+            problem = new ProblemDetails
+            {
+                Status = appException.StatusCode,
+                Title = appException.Title,
+                Detail = appException.Details
+            };
+
+            // The UI reads {"error", "message", "details"} (contracts/api.md); ProblemDetails carries them as extensions.
+            problem.Extensions["error"] = appException.Code;
+            problem.Extensions["message"] = appException.Details;
+            problem.Extensions["details"] = appException.Problems
+                .Select(item => new { path = item.Path, message = item.Message })
+                .ToList();
+        }
+        else
+        {
+            _logger.LogError(exception, "Unhandled exception while processing {Path}.", httpContext.Request.Path);
+
+            // Internal messages stay hidden outside Development.
+            problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status500InternalServerError,
+                Title = "Internal Server Error",
+                Detail = _environment.IsDevelopment() ? exception.Message : "An unexpected error occurred."
+            };
+        }
+
+        httpContext.Response.StatusCode = problem.Status!.Value;
+        // contracts/events.md promises application/problem+json; WriteAsJsonAsync alone sends application/json.
+        await httpContext.Response.WriteAsJsonAsync(
+            problem,
+            options: null,
+            contentType: "application/problem+json",
+            cancellationToken);
+
+        return true;
+    }
+}

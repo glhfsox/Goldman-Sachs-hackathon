@@ -12,6 +12,7 @@ HANDOFF.md
 __pycache__/
 node_modules/
 .DS_Store
+.idea/
 
 # data and weights (GitHub rejects files > 100 MB)
 /data/raw/
@@ -20,3 +21,7 @@ node_modules/
 *.ckpt
 *.safetensors
 *.onnx
+
+# .NET
+bin/
+obj/

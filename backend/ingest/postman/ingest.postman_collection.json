@@ -1,0 +1,297 @@
+{
+  "info": {
+    "name": "Ingest",
+    "description": "Ingest HTTP API (contracts/events.md section 1). Needs the service on {{baseUrl}} with the four seed sources. Run: backend/ingest/postman/run.sh",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8001"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 ok\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql(\"ok\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook: JSON event (alertmanager-http)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/ingest/alertmanager-http",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingest",
+            "alertmanager-http"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"alertname\":\"HighErrorRate\",\"labels\":{\"service\":\"payments-api\",\"severity\":\"critical\"},\"status\":\"firing\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"JSON: 202 Accepted\", () => pm.response.to.have.status(202));",
+              "pm.test(\"body has a UUID v7 event_id\", () => {",
+              "  const id = pm.response.json().event_id;",
+              "  pm.expect(id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook: log line as text (pricing-logs-http)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "text/plain"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/ingest/pricing-logs-http",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingest",
+            "pricing-logs-http"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "ERROR pricing-engine cache miss"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"text: 202 Accepted\", () => pm.response.to.have.status(202));",
+              "pm.test(\"body has a UUID v7 event_id\", () => {",
+              "  const id = pm.response.json().event_id;",
+              "  pm.expect(id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook: broken JSON becomes a string payload",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/ingest/pricing-logs-http",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingest",
+            "pricing-logs-http"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"not\": json"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"broken JSON: 202 Accepted\", () => pm.response.to.have.status(202));",
+              "pm.test(\"body has a UUID v7 event_id\", () => {",
+              "  const id = pm.response.json().event_id;",
+              "  pm.expect(id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unknown source",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/ingest/does-not-exist",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingest",
+            "does-not-exist"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"404 problem+json\", () => {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Kafka source is not a webhook (workflows-kafka)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/ingest/workflows-kafka",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingest",
+            "workflows-kafka"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"404 problem+json\", () => {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Body over 64 KiB",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "text/plain"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/ingest/pricing-logs-http",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingest",
+            "pricing-logs-http"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{{bigBody}}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.variables.set(\"bigBody\", \"x\".repeat(64 * 1024 + 1));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"413 problem+json\", () => {",
+              "  pm.response.to.have.status(413);",
+              "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

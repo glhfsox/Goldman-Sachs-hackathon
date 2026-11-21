@@ -171,6 +171,7 @@ flowchart TB
   n_sources(["<b>sources</b><br/><small>external</small>"])
   n_channels(["<b>channels</b><br/><small>external</small>"])
   n_claude_api(["<b>claude_api</b><br/><small>external</small>"])
+  n_typesafe_api(["<b>typesafe_api</b><br/><small>external</small>"])
   subgraph a_infra ["infra"]
     n_source_kafka("<b>source_kafka</b><br/><small>topic</small>")
     n_events_raw("<b>events_raw</b><br/><small>topic</small>")
@@ -190,6 +191,7 @@ flowchart TB
     n_processor("<b>processor</b><br/><small>service</small>")
     n_notifier("<b>notifier</b><br/><small>service</small>")
     n_api("<b>api</b><br/><small>service</small>")
+    n_mock_target("<b>mock_target</b><br/><small>service</small>")
     n_ai_worker("<b>ai_worker</b><br/><small>service</small>")
   end
   subgraph a_frontend ["frontend"]
@@ -213,7 +215,9 @@ flowchart TB
   n_config_changes -- "sources" --> n_ingest
   n_config_changes -- "mappings, rules, service map" --> n_processor
   n_config_changes -- "rules, teams, on-call, preferences, runbooks" --> n_notifier
-  n_config_changes -- "runbook drafts" --> n_ai_worker
+  n_config_changes -- "runbook drafts, mappings, rules" --> n_ai_worker
+  n_alerts_changes -- "alert change" --> n_ai_worker
+  n_api -- "alert timeline, runs to risk-check, finished runs (REST)" --> n_ai_worker
   n_notifier -- "notifications, config and alert copies" --> n_notifier_db
   n_notifier -- "rendered message" --> n_channels
   n_notifier -- "notification status" --> n_alerts_timeline
@@ -223,16 +227,18 @@ flowchart TB
   n_redis -- "ui.alerts" --> n_api
   n_api -- "config, timeline, action runs, alert copy" --> n_api_db
   n_api -- "REST, WebSocket" --> n_web_ui
+  n_api -- "runbook actions (HTTP, Idempotency-Key)" --> n_mock_target
   n_web_ui -- "user actions" --> n_api
-  n_ai_worker -- "jobs" --> n_ai_worker_db
-  n_ai_worker -- "mappings, canonical runbooks, proposals (REST)" --> n_api
-  n_ai_worker -- "sample payload, runbook text" --> n_claude_api
+  n_ai_worker -- "jobs, alert history, run history, Claude job checkpoints" --> n_ai_worker_db
+  n_ai_worker -- "mappings, canonical runbooks, proposals, run risk checks (REST)" --> n_api
+  n_ai_worker -- "sample payload, runbook text, alert timeline" --> n_claude_api
+  n_ai_worker -- "rule, alert summary, reaction and run stats, run actions with filled params" --> n_typesafe_api
   classDef k0 fill:#dbeafe,stroke:#2563eb,color:#111827
-  class n_sources,n_channels,n_claude_api k0
+  class n_sources,n_channels,n_claude_api,n_typesafe_api k0
   classDef k1 fill:#dcfce7,stroke:#16a34a,color:#111827
   class n_source_kafka,n_events_raw,n_alerts_changes,n_config_changes,n_alerts_timeline,n_schema_samples k1
   classDef k2 fill:#fef3c7,stroke:#d97706,color:#111827
-  class n_ingest,n_processor,n_notifier,n_api,n_ai_worker k2
+  class n_ingest,n_processor,n_notifier,n_api,n_mock_target,n_ai_worker k2
   classDef k3 fill:#fce7f3,stroke:#db2777,color:#111827
   class n_redis,n_ingest_db,n_processor_db,n_notifier_db,n_api_db,n_ai_worker_db k3
   classDef k4 fill:#ede9fe,stroke:#7c3aed,color:#111827
@@ -254,7 +260,7 @@ Every service is stateless; all state sits in Kafka, Redis or the service's own 
 | Processor (`backend/processor`) | Applies the stored schema mapping, or marks the event unmapped. Evaluates rules. Deduplicates and groups per rule. Links related alerts into incidents. Owns alert state: writes it, publishes state changes to `alerts.changes`, applies acks and resolves from the API, and auto-resolves an alert when nothing recurs for the rule's window. | Alerts, incidents and an outbox, plus its copies of mappings, rules and the service map compiled into memory (`processor` database); counters (Redis) | Kafka partitions of `events.raw` |
 | Notifier (`backend/notifier`) | Policy: who is told, when, on which channel, in one message or a digest. Writes notification rows with a send time. Workers send through channel adapters with retry, backoff and a fallback channel. A scheduler loop runs escalation steps and digests. Reports every delivery on `alerts.timeline`. | Notification outbox, plus its copies of rules, teams, on-call, preferences, runbooks and alert state (`notifier` database) | Workers claiming rows with `SKIP LOCKED` |
 | API (`backend/api`) | REST and WebSocket for the UI: live feed, ack and resolve, rules, mappings, preferences, runbooks, approvals, improvement proposals. Hosts the runbook module: lookup, placeholder fill, and the action runner with its approval gate. | Owns all configuration (published on `config.changes`), runbooks, the timeline, action runs and proposals; keeps a read copy of alerts and deliveries (`api` database); pushes via Redis pub/sub | Replicas; any replica can push to any browser |
-| AI worker (`backend/ai-worker`) | Off the event path. Proposes a mapping for a new schema, converts an uploaded runbook to the canonical form, and drafts runbook updates from action logs. Sends its results to the API over REST. | Its job queue (`ai_worker` database) | One or two workers with a concurrency cap |
+| AI worker (`backend/ai-worker`) | Off the event path. An LLM agent with three tools, each checked by code before anything is saved: it writes the mapping for a new schema, converts an uploaded runbook to the canonical form, and proposes a runbook from the timeline of a resolved alert. Three judges on TypeSafe Jev (a decision model, one call per job, never per event): one proposes the severity a rule should fix from how people reacted to its alerts; one checks every runbook run of risk `auto` before it starts and holds it for a person when it is risky or the judge did not answer; one proposes, from the run history, whether a runbook's runs should start by themselves or wait for approval. On its own a judge can only make things more careful. Sends its results to the API over REST. | Its job queue, alert history and copy of finished runbook runs (`ai_worker` database) | One or two workers with a concurrency cap |
 
 Shared infrastructure: one internal Kafka cluster used by all backend services, with five topics
 (`events.raw` and `alerts.changes` on the event path; `config.changes`, `alerts.timeline` and `schema.samples`
@@ -267,10 +273,10 @@ runbook actions call.
 | Service | Database | Owns | Keeps a copy of (fed by) |
 |---|---|---|---|
 | Ingest | `ingest` | nothing | Sources (`config.changes`) |
-| Processor | `processor` | Alerts, incidents, its outbox, the schemas already reported | Mappings, rules, service map (`config.changes`) |
+| Processor | `processor` | Alerts, incidents, its outbox, the schemas already reported, parked unmapped events | Mappings, rules, service map (`config.changes`) |
 | Notifier | `notifier` | Notifications (delivery outbox) | Alerts (`alerts.changes`); rules, teams, users, on-call, preferences, runbooks (`config.changes`) |
 | API | `api` | Sources, mappings, rules, teams, users, on-call, preferences, service map, runbooks, timeline, action runs, proposals | Alerts (`alerts.changes`), deliveries (`alerts.timeline`), schema samples (`schema.samples`) |
-| AI worker | `ai_worker` | Its job queue | nothing |
+| AI worker | `ai_worker` | Its job queue, its alert history | Finished runbook runs (the api's `GET /runs`) |
 
 - A table has one owner, and only that service connects to the database it lives in.
 - Data crosses services only as Kafka records on the shared cluster, or through the API's REST endpoints
@@ -285,7 +291,8 @@ runbook actions call.
    to `events.raw`, and acknowledges the source only after Kafka confirms.
 2. A Processor replica reads it and finds the mapping whose `match` condition fits. It builds the envelope
    `{source, type, severity, env, service, ts, dedup_hints, raw}`. With no mapping it builds an unmapped
-   envelope with defaults and publishes one sample of that schema to `schema.samples` for the AI worker.
+   envelope with defaults, publishes one sample of that schema to `schema.samples` for the AI worker, and
+   parks the event; when the mapping arrives, parked events run again as mapped ones.
 3. It evaluates every team's rules against the envelope and `raw`. Each matching rule yields an alert key
    from that rule's `alert_key` and window settings.
 4. For each key, one atomic Redis operation bumps the alert's counter and `last_seen`, skipping an event
@@ -317,7 +324,7 @@ each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-cr
 | Area | Proposed | Final | Needed for |
 |---|---|---|---|
 | Normalization | Claude maps every payload | Claude writes a mapping once per schema; Processor applies it | AC-2.2, AC-9.2 |
-| Unknown schema | No path when the LLM fails or is slow | Event shown as unmapped at once; mapping proposed in the background | AC-2.1 |
+| Unknown schema | No path when the LLM fails or is slow | Event shown as unmapped at once; mapping written in the background, then the waiting events are processed with it | AC-2.1 |
 | Ingest | Preprocesses payloads; hand-off undecided | Receives, stamps, enqueues; acknowledges after Kafka confirms | AC-1.2, AC-9.2 |
 | Dedup | Separate job before the Rule Engine | Step in Processor after rule match, keyed by the rule's settings | AC-4.1, AC-4.4 |
 | Aggregation | Per routed bucket | Incidents correlated across teams with a `depends_on` service map | AC-4.2 |
@@ -357,12 +364,18 @@ each change is needed for (AC = [docs/acceptance-criteria.md](docs/acceptance-cr
   `alerts.timeline`, schema samples on `schema.samples`; the Processor, which owns alert state, auto-resolves
   alerts (was: Notifier); the AI worker saves its results through the API.
 - New schema: a Claude-proposed mapping is applied automatically once it validates on the stored sample.
-- Unmapped events: only events arriving after the mapping is active use it; no replay.
+- Unmapped events: the processor parks them (up to 1,000 per schema, for 1 hour) and processes them as
+  soon as a mapping for them is active (changed on 21-11, was: no replay).
 - Rule language: a JSON tree of `{all / any: [{field, op, value}]}`, shared by rules, mapping `match` and
   runbook `matches` ([contracts/rules.md](contracts/rules.md)).
 - Dedup and correlation windows: 5 minutes by default, per rule; an estimate, not measured.
 - Defaults that stand until someone objects: teams, people and on-call are seeded tables with no login
   and a user picker in the UI; the load test reports ingest → alert visible and ingest → mock channel
-  separately, with the duplicate ratio stated; Claude receives one truncated sample payload per new schema
-  and runbook text on upload.
+  separately, with the duplicate ratio stated; Claude receives one truncated sample payload per new schema,
+  runbook text on upload, and the event and timeline (capped) of a resolved alert on which people ran actions.
+- Runbook runs (decided 21-11, spec in issues #73 and #75): the action registry puts every run in one of three risks.
+  `read_only` starts at once, `approval` always waits for a person, and `auto` starts only after the Jev risk
+  check clears it; a risky run, an unsure answer or no answer means it waits for a person. TypeSafe Jev receives
+  the rule, a summary of the alert, the run's actions with filled parameters and reaction statistics: no raw
+  payload, no user ids.
 - AC-5.1, AC-5.2 and AC-7.2 are still TBD: the design supports them, the thresholds are not set.

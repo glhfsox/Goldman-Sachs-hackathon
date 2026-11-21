@@ -1,0 +1,40 @@
+# One command starts Ingest with its database and the shared Kafka:  docker compose up --build
+# Ports, env vars and hosts: contracts/services.md and contracts/storage.md.
+name: ingest
+
+include:
+  - path: ../kafka/docker-compose.yml
+  # The sources cluster (`kafka-sources:9092`), so the kafka sources work in this one command.
+  - path: ../../data/kafka-sources/docker-compose.yml
+
+services:
+  ingest-db:
+    image: postgres:17
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: alerts
+      POSTGRES_PASSWORD: alerts
+      POSTGRES_DB: ingest
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alerts -d ingest"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ingest:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      SOURCE_KAFKA_BROKERS: kafka-sources:9092
+      DATABASE_URL: postgres://alerts:alerts@ingest-db:5432/ingest
+      ENABLE_SWAGGER: "true"
+    depends_on:
+      ingest-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      kafka-sources-init:
+        condition: service_completed_successfully

@@ -1,0 +1,36 @@
+{
+  "id": "pricing-engine-errors",
+  "team_id": "pricing",
+  "when": {
+    "all": [
+      {
+        "field": "service",
+        "op": "glob",
+        "value": "pricing-engine*"
+      },
+      {
+        "field": "severity",
+        "op": "sev_gte",
+        "value": "error"
+      }
+    ]
+  },
+  "alert_key": [
+    "raw.instrument"
+  ],
+  "window_s": 300,
+  "route": {
+    "recipients": [
+      {
+        "team": "pricing"
+      }
+    ],
+    "channels": [
+      "ui"
+    ]
+  },
+  "present": {
+    "title": "Pricing errors on {{instrument}}",
+    "color": "orange"
+  }
+}

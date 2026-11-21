@@ -1,8 +1,10 @@
 # API for the UI: REST and WebSocket
 
 Base URL `http://localhost:8000/api`. JSON in and out. No auth in the PoC: every request carries
-`X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log.
-Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status.
+`X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log. A service
+calling the api sends its own name there: the ai-worker sends `X-User: ai-worker`.
+`X-User` is required on `ack` and `resolve`: a missing header is `422 invalid_user`, an unknown user id is `404 not_found`.
+Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status; the api sends them as `application/problem+json`, so `title`, `status` and `detail` are there too. Codes: `forbidden` (403), `not_found` (404), `conflict` (409), `invalid_<thing>` (422).
 
 ## Alert object
 
@@ -38,30 +40,157 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 
 | Method and path | Body | Returns |
 |---|---|---|
-| `GET /alerts?team=&status=&limit=` | | `[Alert]`, newest first |
+| `GET /alerts?team=&status=&limit=` | | `[Alert]`, newest `first_seen` first; `limit` defaults to 50, at most 200 |
 | `GET /alerts/{id}` | | `{alert, incident, timeline: [alert_events], notifications: [...], runbook}` |
-| `POST /alerts/{id}/ack` | | `Alert` |
-| `POST /alerts/{id}/resolve` | | `Alert` |
+| `POST /alerts/{id}/ack` | | `Alert` as published, with `status: acked` and `acked_by`. `409 conflict` unless the alert is `open` |
+| `POST /alerts/{id}/resolve` | | `Alert` as published, with `status: resolved` and `resolved_by`. `409 conflict` when it is already `resolved` |
 | `GET /rules?team=` | | `[Rule]` ([rules.md](rules.md)) |
-| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule` |
-| `GET /mappings`, `PUT /mappings/{id}` | `Mapping` | `Mapping`, or `422 invalid_mapping` |
-| `GET /schema-samples?status=` | | unmapped schemas waiting for a mapping |
-| `GET /sources`, `POST /sources` | `{id, kind, config}` | `Source` |
-| `GET /teams`, `GET /users` | | lists for pickers; a team includes `members` and who is on call |
-| `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` | `Preferences` |
-| `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` until converted and activated) |
-| `PUT /runbooks/{id}` | `{canonical?, status?}` | `Runbook` |
-| `POST /alerts/{id}/actions` | `{runbook_id, step_index}` | `ActionRun`: `running`, or `waiting_approval` when the step needs approval |
-| `POST /actions/{id}/approve`, `POST /actions/{id}/reject` | | `ActionRun` |
-| `POST /alerts/{id}/proposals` | `{kind, body}` | `Proposal` |
-| `GET /proposals?status=open` | | `[Proposal]` |
-| `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal` |
+| `GET /rules/{id}` | | `Rule` |
+| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule`. `409 conflict` for a taken id on `POST`; on `PUT` the body `id` must equal the URL id |
+| `GET /mappings`, `PUT /mappings/{id}[?fingerprint=<fingerprint>]` | `Mapping` | `Mapping`, or `422 invalid_mapping`. `PUT` creates or replaces; `GET` lists highest `priority` first. With `fingerprint`, that schema sample becomes `mapped` in the same save; an unknown fingerprint is `404` and nothing is saved |
+| `GET /schema-samples?status=` | | `[{fingerprint, source_id, sample, status, error, created_at}]`, oldest first; `status` is `pending`, `mapped` or `failed` |
+| `PUT /schema-samples/{fingerprint}` | `{status: "failed", error}` | the sample; the ai-worker calls it when it could not produce a valid mapping, so a person writes one in the UI. `422 invalid_schema_sample` for any other status, `404` for an unknown fingerprint, `409` when the sample is already `mapped` |
+| `GET /sources`, `GET /sources/{id}`, `POST /sources` | `{id, kind, config}` | `Source`. `id`: lowercase letters, digits, `-`; a `kafka` source needs `config.topic`; `422 invalid_source` otherwise, `409 conflict` for a taken id |
+| `PUT /sources/{id}` | `{kind, config, enabled}` | `Source` (also how a source is disabled) |
+| `GET /teams` | | `[{id, name, members: [{user_id, name, on_call}]}]`, for pickers; read-only (seeded) |
+| `GET /users` | | `[{id, name, email, phone}]`, for the user picker; read-only (seeded) |
+| `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` ([rules.md](rules.md) §5) | `Preferences`. `PUT` creates or replaces; `422 invalid_preferences` (one `details` entry per wrong path, `user_id` must equal the URL id), `404 not_found` for an unknown user, or for `GET` a user without preferences |
+| `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` and `version` 1 until the ai-worker has converted it, [runbooks.md](runbooks.md)). The id is made from `title` (lowercase, `-`, a `-2` suffix when taken) |
+| `GET /runbooks/{id}` | | `Runbook` |
+| `PUT /runbooks/{id}` | `{canonical?, status?}` | `Runbook`. A new `canonical` bumps `version` and clears `accepted_by`; `canonical.id` must equal the URL id; `active` needs a canonical. `422 invalid_runbook` with one `details` entry per wrong path |
+| `POST /runbooks/{id}/accept?version=` | none, `X-User` of a person; `version` = the version the person reviewed (required, `422` without it) | `Runbook` with `accepted_by` and `accepted_at`. `403` for a service actor or an unknown user, `409` when the runbook is not `active` or `version` is not the current one |
+| `GET /alerts/{id}/runs/preview?runbook_id=` | | `{runbook_id, runbook_version, risk, nodes: [{id, text, action, risk, params, missing}]}`: what starting a run would do, with every `{{placeholder}}` filled. `missing` lists the placeholders the alert has no value for (that step starts `blocked`) |
+| `POST /alerts/{id}/runs` | `{runbook_id}`, `X-User` of a person | `RunbookRun`, `201`, `running` at once; the person's start is the approval, whatever the risk. `403` for a service actor, `404` unknown alert or runbook, `409` when the alert has a live run, is resolved, or the runbook is not `active`, not accepted (`accepted_by`) or another team's, `422 invalid_run` without `runbook_id` or `422 invalid_runbook` when a step does not resolve |
+| `GET /runs/{id}` | | `RunbookRun` with every node |
+| `POST /runs/{id}/cancel` | none, `X-User` of a person | `RunbookRun`, `cancelled`: every step not yet started is `cancelled`, a running one finishes. `409` unless the run is `scheduled`, `waiting_approval` or `running` |
+| `POST /runs/{id}/nodes/{node}/done` | none, `X-User` of a person | The node, `succeeded`. Only for a text-only step that is still `pending` in a live run, otherwise `409` |
+| `POST /alerts/{id}/proposals` | `{kind, body}` with `X-User` (a person or `ai-worker`), optional header `Idempotency-Key` (a retrying client sends a stable job id) | `Proposal`, `201`. A repeated `Idempotency-Key` returns the first proposal with `200` whatever the body; without a key, an identical open proposal (same alert, kind and body) is returned with `200` instead of a second one. `422 invalid_proposal` (one `details` entry per wrong path, each starting with `body.` or `kind`), `404` for an unknown alert or an `X-User` that is neither a user nor `ai-worker` |
+| `GET /proposals?status=&limit=` | | `[Proposal]`, newest first; `status` is `open`, `accepted` or `rejected`; `limit` defaults to 50, at most 200 |
+| `GET /proposals/{id}` | | `Proposal`, `404` when unknown |
+| `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal`. Only a person: `403` for `ai-worker` or an unknown `X-User`. `409` when the proposal is not `open` |
+| `GET /runbook-starts?rule=&runbook=` | | `[RunbookStart]` ordered by rule and runbook; a pair with no row starts as `approval` |
+| `PUT /runbook-starts/{rule_id}/{runbook_id}` | `{start}`: `auto` or `approval`, with `X-User` | `RunbookStart` `{rule_id, runbook_id, start, set_by, updated_at}`, created or replaced. Only a person: `403` for `ai-worker`, a service or no `X-User`. `404` for an unknown rule or runbook, `422 invalid_runbook_start` for another mode. `auto` takes effect only for an `auto`-risk run of a runbook version a person accepted ([runbooks.md](runbooks.md) §2). Not published on `config.changes` |
 
-`runbook` in `GET /alerts/{id}` is the canonical runbook ([runbooks.md](runbooks.md)) with every
-`{{placeholder}}` already filled from the alert's `sample_event`, plus the latest `ActionRun` per step.
+A `Proposal` is `{id, alert_id, kind, body, author, status, decided_by, created_at, decided_at}`; `kind` is `threshold`, `template`, `runbook`, `rule_severity` or `runbook_start`. Accepting applies the proposal: `rule_severity` sets the rule's `severity` (published on `config.changes`; `409` when the rule no longer exists); `runbook` saves `body.canonical` as a new runbook that is `active` and accepted by that person, with an id made from `body.title` (the id inside `canonical` is replaced); `threshold` and `template` only change the status, a person applies them; `runbook_start` sets the start mode of `body.runbook_id` on `body.rule_id` (the row of `GET /runbook-starts`, `set_by` = the accepting person; `409` when the rule or runbook no longer exists). Creating and deciding add the timeline rows `proposal_created` and `proposal_decided`.
+
+| `GET /actions` | | `[{name, risk, default_target, url_method, timeout_s}]`: the registered runbook actions ([runbooks.md](runbooks.md) §3) |
+| `GET /action-targets`, `GET /action-targets/{id}` | | `[ActionTarget]`, `ActionTarget` |
+| `PUT /action-targets/{id}` | `{base_url, origins?, operations, secret_ref?}` | `ActionTarget` (create or replace, `version` + 1). `422 invalid_action_target` with one `details` entry per wrong path; `409` when the change would make an active runbook invalid (the message names them) |
+
+An `ActionTarget` is `{id, base_url, origins, operations, secret_ref, version, updated_at}` ([runbooks.md](runbooks.md) §3).
+Saving a runbook or accepting it while another request changed the same runbook is `409 conflict`.
+
+A `Runbook` is `{id, team_id, title, format, source, canonical, status, version, accepted_by, accepted_at, updated_at}`;
+`canonical` is `null` on a draft.
+
+`incident` in `GET /alerts/{id}` is `null` until incidents are built. `runbook` is how far the alert's latest run has got, or `null`
+when no run was started: `{run_id, runbook_id, status, steps_total, steps_done, steps: [{node, status}]}`. `status` is the run's
+(`scheduled`, `waiting_approval`, `running`, `done`, `failed`, `cancelled`); a step's is its node's ([runbooks.md](runbooks.md) §2). `steps_done` counts
+`succeeded` and `skipped` steps, so a text-only step counts once a person ticks it. The UI refetches the alert on the
+`timeline` message the api pushes after every run or step change.
 
 Each item of `notifications` carries what the UI needs for "why you got this / why not":
 `{id, user_id, channel, status, reason, send_at, sent_at, error}`.
+
+Each item of `timeline` is an `alert_events` row `{id, alert_id, at, actor, kind, data}`
+([schemas/api.md](schemas/api.md)). For the `action_*` kinds, `data` is
+`{"action_run": {id, runbook_id, step_index, action, params, status, result}}`; `action_finished`, written by the executor
+once per attempt of a step, also has `run_id`, `node_id` and `attempt` (example in [schemas/api.md](schemas/api.md)).
+
+A proposal of kind `runbook` has the body `{team_id, title, canonical}`, where `canonical` is a
+canonical runbook ([runbooks.md](runbooks.md)). The ai-worker files one when an alert is resolved after
+people ran actions on it; accepting it saves that runbook as `active`. Example:
+
+```json
+{"kind": "runbook", "body": {"team_id": "settlements", "title": "WORKFLOW_FAILED in prod",
+ "canonical": {"id": "workflow-failed-prod", "title": "WORKFLOW_FAILED in prod",
+  "matches": {"all": [{"field": "type", "op": "eq", "value": "WORKFLOW_FAILED"}, {"field": "env", "op": "eq", "value": "prod"}]},
+  "steps": [{"text": "Check counterparty-service health", "action": "http_get",
+             "params": {"url": "http://counterparty-service/health"}, "approval": "none"}]}}}
+```
+
+A proposal of kind `rule_severity` suggests the severity a rule should fix for its alerts (the rule's
+`severity`, [rules.md](rules.md) §4). The ai-worker files it on one of the rule's alerts: on the rule's
+first alert (`mode: "first"`, judged from the rule and that alert alone, `stats: null`), and each time the
+rule's resolved alerts reach a multiple of 20 (`mode: "history"`, judged from how people reacted to its
+most recent resolved alerts: at most 200, resolved in the last 30 days, and only when at least 20 are left).
+It is filed only when the suggestion differs from the rule's current `severity` with a confidence of at
+least 0.5. `current_severity` is null when the rule fixes none. `reasons` are plain sentences for the UI.
+Accepting it sets the rule's `severity` to `body.severity` (a `PUT /rules/{rule_id}`, published on
+`config.changes` like any rule change). Example:
+
+```json
+{"kind": "rule_severity", "body": {"rule_id": "settlements-workflow-failed", "team_id": "settlements",
+ "severity": "critical", "current_severity": "warning", "confidence": 0.82,
+ "probabilities": {"info": 0.02, "warning": 0.06, "error": 0.1, "critical": 0.82}, "mode": "history",
+ "stats": {"window": {"max_alerts": 200, "max_age_days": 30}, "resolved_alerts": 20, "acked_share": 0.7,
+           "median_minutes_to_ack": 3.0, "auto_resolved_unacked_share": 0.25, "reopened_share": 0.05,
+           "median_count": 4.0, "severities": {"critical": 20}},
+ "reasons": ["it comes from production", "people usually react within minutes",
+             "14 of 20 alerts were acknowledged by a person, median 3 min",
+             "5 of 20 resolved on their own without anyone acknowledging them", "1 of 20 were reopened",
+             "median 4 events per alert"]}}
+```
+
+### Runbook runs: risk check, approval and `GET /runs` (issue #75)
+
+On top of the run model of issue #73 (run risk `read_only` / `auto` / `approval`; an `auto` run is created
+`scheduled` with `start_at` = now + cancel window). The api serves all of this; `RUNBOOK_RISK_CHECK=false` turns the
+check off ([services.md](services.md)).
+
+| Method and path | Body | Returns |
+|---|---|---|
+| `GET /runs?risk_check=pending` | | `[RunbookRun]`: status `scheduled`, risk `auto`, `risk_check: null`. The ai-worker polls it every 2 s |
+| `POST /runs/{id}/risk-check` | `{verdict, confidence, reasons}`, `X-User: ai-worker` | `RunbookRun`. While the run is `scheduled` a `hold` always applies (the run goes to `waiting_approval`), even over an earlier `clear`; a second `clear` changes nothing. `409` when the run is no longer `scheduled` (so a `clear` after a `hold` changes nothing); the same verdict twice changes nothing |
+| `POST /runs/{id}/approve` | none, `X-User` of a person | `RunbookRun`, now `running`. `403` for a service actor, `409` unless the run is `waiting_approval` |
+| `GET /runs?finished_since=<ISO time>&limit=` | | `[RunbookRun]` with status `done`, `failed` or `cancelled`, oldest first. The ai-worker polls it every 30 s from 5 minutes before the newest run it holds |
+
+- `verdict`: `clear` (the run starts at `start_at`) or `hold` (it goes to `waiting_approval` with the reasons and
+  starts when a person approves). `confidence`: 0 to 1. `reasons`: at most 6 plain sentences for the UI. The
+  ai-worker sends `clear` only when Jev chose it with confidence of at least 0.6.
+- No verdict by `start_at`: the api moves the run to `waiting_approval` (reason "risk check did not answer"); a run
+  never starts unchecked. The ai-worker never starts or approves a run.
+- A `RunbookRun` has `id`, `alert_id`, `rule_id`, `team_id`, `runbook_id`, `runbook_version`, `risk`, `trigger` (`auto` or
+  `manual`), `status`, `start_at`, `approved_by`, `approved_at`, `started_at`, `finished_at`, `cancelled_by` and
+  `nodes: [{id, step_index, text, action, risk, params, needs, status, attempt, result, started_at, finished_at}]` with
+  params filled. `risk_check` is `{verdict, confidence, reasons, by, at}` or null; when no verdict came by `start_at`
+  it is `{verdict: "hold", confidence: null, reasons: ["risk check did not answer"], by: "runbook-scheduler"}`.
+- A body with another `verdict`, a `confidence` outside 0 to 1 or missing, or more than 6 reasons is `422 invalid_run`; any
+  `X-User` but `ai-worker` is `403`. `GET /runs` without `risk_check=pending` or `finished_since` is `422`; `limit` is 100 by default, 500 at most.
+- Timeline rows: `run_cleared` and `run_held` (`data.reasons`), then `run_started` when a person approves. A `waiting_approval`
+  run counts as live: it blocks a new run on the alert and `resolved` cancels it.
+
+```json
+POST /api/runs/run-7f3a/risk-check
+{"verdict": "hold", "confidence": 0.94,
+ "reasons": ["it runs in production", "customers or money are affected right now",
+             "the action cannot be undone easily"]}
+```
+
+A proposal of kind `runbook_start` says how runs of `runbook_id` on `rule_id` should start: `auto` or
+`approval`. The ai-worker files it on the alert of the pair's latest finished run each time the pair's finished
+runs reach a multiple of 10, judged from its most recent finished runs (at most 50, finished in the last 30 days,
+at least 10 left), when Jev's choice differs from `current_start` (the pair's `runbook_starts` row from `GET /runbook-starts`, `approval` without one)
+with confidence of at least 0.6. Accepting it sets the pair's `runbook_starts` row to
+`body.start`. Example:
+
+```json
+{"kind": "runbook_start", "body": {"rule_id": "settlements-workflow-failed", "team_id": "settlements",
+ "runbook_id": "workflow-retry", "start": "auto", "current_start": "approval", "confidence": 0.66,
+ "probabilities": {"auto": 0.83, "approval": 0.17},
+ "stats": {"window": {"max_runs": 50, "max_age_days": 30}, "runs": 10, "auto_started_share": 0.0,
+           "approved_share": 1.0, "median_seconds_from_alert_to_approve": 8, "cancelled_before_start_share": 0.0,
+           "cancelled_after_start_share": 0.0, "held_share": 0.0, "failed_share": 0.0,
+           "rule_alerts": 12, "alerts_without_run": 2, "alerts_without_run_share": 0.167},
+ "reasons": ["10 of 10 runs were approved by a person, median 8 s after the alert", "no run was cancelled",
+             "no run failed", "2 of 12 alerts of this rule got no run"]}}
+```
+
+`median_seconds_from_alert_to_approve` is measured from the alert's `opened_at` (null when the ai-worker never saw
+the alert). `rule_alerts` counts the rule's alerts opened in the same 30 days and `alerts_without_run` those that got
+no run; all three alert fields are null when the ai-worker holds no alert of the rule.
+
+The api accepts exactly what the processor reads: unknown fields, wrong types and unknown ops are `422`, and `details` has one entry per wrong path.
 
 Example invalid rule:
 
@@ -75,7 +204,7 @@ Example invalid rule:
 `ws://localhost:8000/ws?team=<team id>` (omit `team` for all teams). Server to client only; the three
 message shapes are exactly the Redis `ui.alerts` messages in [events.md](events.md):
 `alert` (insert or replace the card), `count` (update the counter), `timeline` (refetch `GET /alerts/{id}`
-if that alert is open on screen). On reconnect the UI refetches `GET /alerts`.
+if that alert is open on screen). On reconnect the UI refetches `GET /alerts`. With `team`, a message is sent only when its alert is that team's; a message for an alert the api has not stored yet is not sent to such a client. A person's ack or resolve is sent as an `alert` message by the api itself, since the processor does not publish it.
 
 ## Short link
 

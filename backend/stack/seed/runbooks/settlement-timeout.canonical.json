@@ -1,0 +1,14 @@
+{
+  "id": "settlement-timeout",
+  "title": "Settlement timeout",
+  "matches": {"all": [{"field": "type", "op": "eq", "value": "WORKFLOW_FAILED"},
+                      {"field": "raw.error.code", "op": "eq", "value": "TIMEOUT"}]},
+  "steps": [
+    {"text": "Is counterparty-service healthy?", "action": "http_get",
+     "params": {"url": "http://counterparty-service/health"}},
+    {"text": "Retry the workflow", "action": "retry_workflow",
+     "params": {"workflowId": "{{workflowId}}"}},
+    {"text": "Escalate to counterparty-support", "when": "retry fails twice", "action": "escalate",
+     "params": {"team": "counterparty-support"}}
+  ]
+}

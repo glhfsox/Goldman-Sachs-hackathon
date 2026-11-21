@@ -1,0 +1,25 @@
+[project]
+name = "ai-worker"
+version = "0.1.0"
+description = "AI worker: schema mappings, runbook conversion and runbook proposals with Claude, off the event path"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=1.7",
+    "confluent-kafka>=2.16.2",
+    "langgraph>=1.2.24",
+    "langgraph-checkpoint-postgres>=3.2.1",
+    "psycopg[binary]>=3.3",
+    "pydantic>=2.11",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = [".", "../processor"]
+testpaths = ["tests"]

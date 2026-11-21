@@ -1,0 +1,111 @@
+{
+  "config": {
+    "rate": 3000,
+    "duration_s": 120,
+    "probes": 100,
+    "started": "20261121065848",
+    "machine": "one machine (Darwin arm64, Docker); all services share the host clock, so cross-service latencies are comparable"
+  },
+  "throughput": {
+    "window_s": 120.0,
+    "ingested_per_s": 2955.2,
+    "processed_per_s": 2955.0,
+    "peak_ingested_per_s": 4777.8,
+    "peak_processed_per_s": 5524.3,
+    "lag_at_load_end": 27,
+    "drain_s": 1.0,
+    "simulator": {
+      "sent": 354780,
+      "failed": 0,
+      "summary": "done in 120.3 s: generated 354780, sent 354780, failed 0, retries 0, 2950 msg/s"
+    }
+  },
+  "latency_ms": {
+    "ingest_to_ui": {
+      "count": 100,
+      "p50": 82.0000171661377,
+      "p95": 132.99989700317383,
+      "p99": 149.99985694885254,
+      "max": 157.99999237060547
+    },
+    "ingest_to_email": {
+      "count": 100,
+      "p50": 84.0001106262207,
+      "p95": 138.0000114440918,
+      "p99": 158.99991989135742,
+      "max": 160.00008583068848
+    },
+    "ingest_to_sms": {
+      "count": 100,
+      "p50": 87.00013160705566,
+      "p95": 134.99999046325684,
+      "p99": 154.00004386901855,
+      "max": 160.00008583068848
+    }
+  },
+  "probes": {
+    "sent": 100,
+    "lost": 0,
+    "channel_not_sent": {}
+  },
+  "dedup": {
+    "background_events": 354477,
+    "background_alerts_opened": 0,
+    "duplicate_ratio": 1.0
+  },
+  "jev": {
+    "eval_run_risk.py": {
+      "judge": "run_risk",
+      "cases": 30,
+      "right": 25,
+      "accuracy": 0.8333333333333334,
+      "dangerous_misses": 0,
+      "other_misses": 5,
+      "misses": [
+        "prod-log-shipping-retry",
+        "uat-trade-booking-retry",
+        "stg-settlement-25m",
+        "prod-restart-one-of-eight-pricing",
+        "prod-archive-job-retry"
+      ],
+      "repeat": 1,
+      "measured_at": "2026-11-21T07:01:06+00:00"
+    },
+    "eval_run_start.py": {
+      "judge": "run_start",
+      "cases": 16,
+      "right": 15,
+      "accuracy": 0.9375,
+      "dangerous_misses": 0,
+      "other_misses": 1,
+      "misses": [
+        "prod-pricing-restart-always-approved"
+      ],
+      "repeat": 1,
+      "measured_at": "2026-11-21T07:01:10+00:00"
+    },
+    "eval_severity.py": {
+      "judge": "severity",
+      "cases": 20,
+      "right": 9,
+      "accuracy": 0.45,
+      "dangerous_misses": 0,
+      "other_misses": 11,
+      "misses": [
+        "first-stg-settlement-failed",
+        "first-dev-ci-failed",
+        "first-prod-trade-rejected-large",
+        "first-prod-pricing-log-error",
+        "first-prod-eod-reconciliation-failed",
+        "first-prod-disk-80-over-critical",
+        "hist-rates-rejects-same-day-under-warning",
+        "hist-pricing-log-never-acked-over-error",
+        "hist-stg-workflows-never-acked-over-critical",
+        "hist-dev-ci-noise-over-warning",
+        "hist-prod-cert-expiry-slow-acks-over-critical"
+      ],
+      "repeat": 1,
+      "measured_at": "2026-11-21T07:01:14+00:00"
+    }
+  }
+}
