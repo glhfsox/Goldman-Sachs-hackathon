@@ -16,6 +16,23 @@ curl http://localhost:8000/health
 API docs (on in the compose run): spec `http://localhost:8000/openapi/v1.json`, Swagger UI `http://localhost:8000/swagger`.
 The switch is `ENABLE_SWAGGER=true` (or the Development environment); it is off by default.
 
+## Postman
+
+```bash
+./postman/run.sh                 # newman against the API; starts docker compose if the API is down
+KEEP_UP=1 ./postman/run.sh       # leave the stack running afterwards
+```
+
+The collection is `postman/api.postman_collection.json` (import it into Postman; variable `baseUrl`). Only Kafka can create alerts and schema samples, so `run.sh` first puts one alert and two samples on Kafka the way the processor does; ids are unique per run, so it can run again on the same database.
+
+## Failure check: Kafka down
+
+```bash
+./postman/failure-check.sh       # stop Kafka, POST a rule, check the API, start Kafka, find the record
+```
+
+A config change is written to the `outbox` table in the same transaction as the change, and a background job publishes it, so the API keeps answering with Kafka down and the record reaches `config.changes` when Kafka is back. The script prints `PASS` when it did.
+
 ## Check
 
 ```bash
