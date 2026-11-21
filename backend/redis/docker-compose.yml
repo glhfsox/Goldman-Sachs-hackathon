@@ -1,0 +1,15 @@
+# The one shared Redis for local runs (redis:6379 in compose, localhost:6379 on the host). Services that need it
+# include this file, like backend/kafka, so the root docker-compose.yml merges it into one copy instead of
+# failing on two `redis` services:
+#   include:
+#     - path: ../redis/docker-compose.yml
+services:
+  redis:
+    image: redis:7.4.11
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
