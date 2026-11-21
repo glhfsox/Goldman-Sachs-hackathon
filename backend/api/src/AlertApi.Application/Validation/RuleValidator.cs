@@ -13,7 +13,7 @@ public static class RuleValidator
 
         if (!JsonChecks.RequireObject(
                 rule, string.Empty, problems,
-                "id", "team_id", "name", "enabled", "when", "alert_key", "window_s", "route", "present", "runbook_id"))
+                "id", "team_id", "name", "enabled", "severity", "when", "alert_key", "window_s", "route", "present", "runbook_id"))
         {
             return problems;
         }
@@ -37,6 +37,12 @@ public static class RuleValidator
         if (rule.TryGetProperty("enabled", out var enabled))
         {
             JsonChecks.CheckBool(enabled, "enabled", problems);
+        }
+
+        // Null means "the event's severity", the same as leaving the field out (contracts/rules.md section 4).
+        if (rule.TryGetProperty("severity", out var severity) && severity.ValueKind != JsonValueKind.Null)
+        {
+            JsonChecks.CheckOneOf(severity, "severity", problems, "info", "warning", "error", "critical");
         }
 
         if (JsonChecks.TryGetRequired(rule, string.Empty, "when", problems, out var when))
