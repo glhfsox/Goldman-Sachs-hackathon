@@ -10,6 +10,7 @@ import pytest
 
 from ai_worker import jobs, judge
 from ai_worker.agent import JobFailed
+from ai_worker.api import ApiError, file_proposal
 
 T0 = datetime(2026, 11, 1, 10, 0, tzinfo=UTC)
 RULE = {"id": "r1", "team_id": "settlements", "name": "Settlement failed", "enabled": True,
@@ -244,3 +245,12 @@ def test_ask_jev_posts_the_request_and_sorts_errors(jev):
         with pytest.raises(RuntimeError) as e:
             judge.ask_jev({}, {})
         assert not isinstance(e.value, JobFailed) and "test-key" not in str(e.value)
+
+
+@pytest.mark.parametrize("status, raised", [(404, RuntimeError), (422, ApiError)])
+def test_file_proposal_retries_an_alert_the_api_has_not_read_yet(status, raised):
+    def post(path, body):
+        raise ApiError(status, {"error": "x"})
+
+    with pytest.raises(raised):  # RuntimeError retries the job (main.run_one), ApiError fails it
+        file_proposal(SimpleNamespace(post=post), "A1", "rule_severity", {})
