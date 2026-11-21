@@ -23,7 +23,7 @@ The switch is `ENABLE_SWAGGER=true` (or the Development environment); it is off 
 KEEP_UP=1 ./postman/run.sh       # leave the stack running afterwards
 ```
 
-The collection is `postman/api.postman_collection.json` (import it into Postman; variable `baseUrl`). Only Kafka can create alerts and schema samples, so `run.sh` first puts one alert and two samples on Kafka the way the processor does; ids are unique per run, so it can run again on the same database.
+The collection is `postman/api.postman_collection.json` (import it into Postman; variable `baseUrl`). Only Kafka can create alerts and schema samples, so `run.sh` first creates an auto-risk runbook (accepted, with an `auto` start row) and puts two alerts and two samples on Kafka the way the processor does; the second alert matches that runbook, so it gets a run by itself and the "Runbook runs" folder walks it through the risk check and the approval. Ids are unique per run, so it can run again on the same database.
 
 ## Failure check: Kafka down
 
