@@ -91,6 +91,7 @@ EXAMPLE_RULES = [
      "when": {"all": [{"field": "type", "op": "glob", "value": "trade.rejected*"},
                       {"field": "payload.desk", "op": "eq", "value": "rates"},
                       {"field": "payload.notional", "op": "gt", "value": 10000000}]},
+     "severity": "critical",
      "route": {"recipients": [{"team": "rates"}], "channels": ["email", "ui"]},
      "present": {"title": "Trade {{payload.tradeId}} rejected: {{payload.reason}} "
                           "({{payload.notional}} {{payload.currency}})"}},

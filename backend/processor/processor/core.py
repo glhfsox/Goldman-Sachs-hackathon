@@ -289,6 +289,7 @@ class RuleMatch:
     body: str
     fields: dict[str, Any]
     color: str | None
+    severity: str | None  # the rule's fixed severity for its alerts; None: the event's
 
 
 def compile_rules(bodies: Iterable[dict]) -> tuple[list[CompiledRule], list[tuple[Any, str]]]:
@@ -321,6 +322,6 @@ def match_rules(env: dict, rules: list[CompiledRule]) -> list[RuleMatch]:
         digest = hashlib.sha1(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         out.append(RuleMatch(
             r.id, r.team_id, f"{r.id}:{digest}", _render(r.title, env), _render(r.body, env),
-            {p: None if (v := resolve(env, k)) is MISSING else v for p, k in r.fields}, r.color,
+            {p: None if (v := resolve(env, k)) is MISSING else v for p, k in r.fields}, r.color, r.rule.severity,
         ))
     return out
