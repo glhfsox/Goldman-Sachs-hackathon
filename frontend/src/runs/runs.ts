@@ -3,10 +3,10 @@ import type { NodeStatus, Risk, RunNode, RunProgress, RunStatus } from '../api/t
 // Runbook runs come from the API (contracts/api.md, issue #82): preview, start, cancel, mark a text step done,
 // and `runbook` on GET /alerts/{id} for progress. These helpers only decide how to show them.
 
-/** Automatic start (issue #82, step 4) is not served yet: until it is, every run is started by a person. */
-export const AUTO_START_AVAILABLE = false;
+/** Automatic start (issue #82, step 4) is served: an `auto` run starts after its cancel window and the risk check. */
+export const AUTO_START_AVAILABLE = true;
 
-export const LIVE: RunStatus[] = ['scheduled', 'running'];
+export const LIVE: RunStatus[] = ['scheduled', 'waiting_approval', 'running'];
 
 export interface Chip {
   text: string;
@@ -23,6 +23,7 @@ export function progressChip(progress: RunProgress | null | undefined, hasRunboo
   if (progress === null) return hasRunbook ? { text: 'Runbook waits for a person', fg: '#92400E', bg: '#FEF3C7' } : null;
   switch (progress.status) {
     case 'scheduled': return { text: 'Runbook starts soon', fg: '#1A56DB', bg: '#E8F1FF' };
+    case 'waiting_approval': return { text: 'Runbook waits for approval', fg: '#92400E', bg: '#FEF3C7' };
     case 'running': return { text: `Runbook running · ${progress.steps_done} of ${progress.steps_total}`, fg: '#1A56DB', bg: '#E8F1FF' };
     case 'done': return { text: 'Runbook done', fg: '#15803D', bg: '#DCFCE7' };
     case 'failed': return { text: 'Runbook failed', fg: '#B42318', bg: '#FEE4E2' };

@@ -27,14 +27,14 @@ class Api:
     def put(self, path: str, body):
         return self._call("PUT", path, body)
 
-    def post(self, path: str, body):
-        return self._call("POST", path, body)
+    def post(self, path: str, body, headers: dict | None = None):
+        return self._call("POST", path, body, headers=headers)
 
-    def _call(self, method: str, path: str, body, timeout: float = TIMEOUT_S):
+    def _call(self, method: str, path: str, body, timeout: float = TIMEOUT_S, headers: dict | None = None):
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(self.base + path, data=data, method=method,
                                      headers={"X-User": "ai-worker", "Content-Type": "application/json",
-                                              "Accept": "application/json"})
+                                              "Accept": "application/json"} | (headers or {}))
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read()
@@ -50,11 +50,13 @@ class Api:
         return json.loads(raw) if raw else None
 
 
-def file_proposal(api: Api, alert_id: str, kind: str, body: dict) -> dict:
-    """`POST /alerts/{id}/proposals`. The api learns of an alert from `alerts.changes` and may not have read it yet, so
-    its 404 raises a plain error, which retries the job, instead of ApiError, which fails it."""
+def file_proposal(api: Api, alert_id: str, kind: str, body: dict, key: str) -> dict:
+    """`POST /alerts/{id}/proposals` with `Idempotency-Key: key` (the job id), so a retried job files no second one.
+    The api learns of an alert from `alerts.changes` and may not have read it yet, so its 404 raises a plain error,
+    which retries the job, instead of ApiError, which fails it."""
     try:
-        return api.post(f"/alerts/{quote(alert_id, safe='')}/proposals", {"kind": kind, "body": body})
+        return api.post(f"/alerts/{quote(alert_id, safe='')}/proposals", {"kind": kind, "body": body},
+                        {"Idempotency-Key": key})
     except ApiError as e:
         if e.status != 404:
             raise

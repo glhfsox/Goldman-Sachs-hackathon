@@ -241,5 +241,5 @@ def handle(job_input: dict, ctx) -> dict:
     p = file_proposal(ctx.api, alert_id, "rule_severity", {
         "rule_id": rule_id, "team_id": rule.get("team_id"), "severity": sev["choice"], "current_severity": current,
         "confidence": sev["confidence"], "probabilities": answer["probabilities"], "mode": mode, "stats": s,
-        "reasons": reasons})
+        "reasons": reasons}, ctx.job_id)
     return {"proposal_id": p["id"], "proposed": sev["choice"], "answer": answer}

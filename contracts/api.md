@@ -170,9 +170,9 @@ POST /api/runs/run-7f3a/risk-check
 A proposal of kind `runbook_start` says how runs of `runbook_id` on `rule_id` should start: `auto` or
 `approval`. The ai-worker files it on the alert of the pair's latest finished run each time the pair's finished
 runs reach a multiple of 10, judged from its most recent finished runs (at most 50, finished in the last 30 days,
-at least 10 left), when Jev's choice differs from `current_start` (`auto` when at least half of the window's runs had `trigger: auto`)
+at least 10 left), when Jev's choice differs from `current_start` (the pair's `runbook_starts` row from `GET /runbook-starts`, `approval` without one)
 with confidence of at least 0.6. Accepting it sets the pair's `runbook_starts` row to
-`body.start` (`GET /runbook-starts` returns it, so `current_start` can be read there instead of derived). Example:
+`body.start`. Example:
 
 ```json
 {"kind": "runbook_start", "body": {"rule_id": "settlements-workflow-failed", "team_id": "settlements",

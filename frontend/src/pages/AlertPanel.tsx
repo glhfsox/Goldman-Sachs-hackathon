@@ -271,6 +271,7 @@ function RunSection({ alert, runbook, progress, mine, onRunChanged }: { alert: A
     const by = r?.trigger === 'auto' ? 'Started by itself.' : r?.approved_by ? `Started by ${userName(r.approved_by)}.` : '';
     const m: Record<string, [string, string, string]> = {
       scheduled: ['Starts soon', 'Cancel it if you do not want it to run.', '#E8F1FF'],
+      waiting_approval: ['Waiting for approval', `The risk check held it${r?.risk_check?.reasons?.length ? `: ${r.risk_check.reasons.join('; ')}` : ''}. Approve to start it, or cancel it.`, '#FFFBEB'],
       running: [`Running · ${done} of ${progress!.steps_total} done`, `${by} Steps run in order; only text-only steps wait for a person.`, '#F4F4F6'],
       done: [`Done · ${done} of ${progress!.steps_total}`, by, '#F0FDF4'],
       failed: ['Failed', 'A step failed and the run stopped. A person takes it from here.', '#FEF2F2'],
@@ -298,6 +299,7 @@ function RunSection({ alert, runbook, progress, mine, onRunChanged }: { alert: A
           <div className="row" style={{ marginTop: 4 }}>
             {showPreview && !reviewing && <button type="button" className="btn sm dark" onClick={() => setReviewing(true)}>Review and start</button>}
             {!showPreview && finished && <button type="button" className="btn sm on-grey" onClick={() => setReviewing(true)}>Run again</button>}
+            {r?.status === 'waiting_approval' && <button type="button" className="btn sm dark" disabled={busy} onClick={() => void act(() => api.approveRun(r.id), 'Approved. The runbook is running.')}>Approve and start</button>}
             {live && <button type="button" className="btn sm on-grey" disabled={busy} onClick={() => void act(() => api.cancelRun(r!.id), 'Runbook cancelled.')}>Cancel run</button>}
           </div>
         )}

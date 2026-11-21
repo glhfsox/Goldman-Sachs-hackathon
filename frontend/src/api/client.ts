@@ -91,6 +91,7 @@ export const api = {
   runPreview: (alertId: string, runbookId: string) => request<RunPreview>('GET', `/alerts/${encodeURIComponent(alertId)}/runs/preview` + q({ runbook_id: runbookId })),
   startRun: (alertId: string, runbookId: string) => request<RunbookRun>('POST', `/alerts/${encodeURIComponent(alertId)}/runs`, { runbook_id: runbookId }),
   run: (id: string) => request<RunbookRun>('GET', `/runs/${encodeURIComponent(id)}`),
+  approveRun: (id: string) => request<RunbookRun>('POST', `/runs/${encodeURIComponent(id)}/approve`),
   cancelRun: (id: string) => request<RunbookRun>('POST', `/runs/${encodeURIComponent(id)}/cancel`),
   nodeDone: (runId: string, nodeId: string) => request<RunNode>('POST', `/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/done`),
 

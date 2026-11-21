@@ -205,7 +205,7 @@ export type LiveMessage =
   | { type: 'timeline'; alert_id: string };
 
 // Runbook runs (contracts/api.md, issue #82). Automatic start is not served yet: every run is started by a person.
-export type RunStatus = 'scheduled' | 'running' | 'done' | 'failed' | 'cancelled';
+export type RunStatus = 'scheduled' | 'waiting_approval' | 'running' | 'done' | 'failed' | 'cancelled';
 export type NodeStatus = 'pending' | 'ready' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'blocked' | 'cancelled';
 
 export interface RunNode {
@@ -244,6 +244,8 @@ export interface RunbookRun {
   started_at: string | null;
   finished_at: string | null;
   cancelled_by: string | null;
+  /** The ai-worker's check of an `auto` run (contracts/api.md "Runbook runs"); null until it answers. */
+  risk_check: { verdict: 'clear' | 'hold'; confidence: number | null; reasons: string[]; by: string; at: string } | null;
   nodes: RunNode[];
 }
 

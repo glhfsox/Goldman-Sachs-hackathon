@@ -27,20 +27,24 @@ def answer(name, choice, confidence, factors=0.9, options=("clear", "hold")):
             | {k: {"type": "noul", "noul": factors} for k in runs.FACTORS}}
 
 
-def fake_ctx(resp=None, post_error=None, run_stats=None):
+def fake_ctx(resp=None, post_error=None, run_stats=None, starts=()):
     calls = []
 
-    def post(path, body):
+    def post(path, body, headers=None):
         calls.append(("POST", path, body))
         if post_error:
             raise post_error
         return {"id": "prop-1"}
 
-    api = SimpleNamespace(get=lambda path, *_: calls.append(("GET", path)) or {"alert": {
-        "title": "WF failed", "severity": "critical", "acked_by": "marek",
-        "sample_event": {"type": "WORKFLOW_FAILED", "service": "order-settlement", "env": "prod", "raw": {"x": 1}}}},
-        post=post)
-    return SimpleNamespace(api=api, rules={"r1": {"name": "Settlement failed", "when": {"all": []}}}, now=lambda: NOW,
+    def get(path, *_):
+        calls.append(("GET", path))
+        if path.startswith("/runbook-starts"):
+            return [{"runbook_id": "rb1", "start": s} for s in starts]
+        return {"alert": {"title": "WF failed", "severity": "critical", "acked_by": "marek", "sample_event": {
+            "type": "WORKFLOW_FAILED", "service": "order-settlement", "env": "prod", "raw": {"x": 1}}}}
+
+    api = SimpleNamespace(get=get, post=post)
+    return SimpleNamespace(api=api, job_id="job-1", rules={"r1": {"name": "Settlement failed", "when": {"all": []}}}, now=lambda: NOW,
                            ask_jev=lambda state, q: calls.append(("jev", state, q)) or resp,
                            run_stats=run_stats), calls
 
@@ -203,8 +207,8 @@ def test_start_proposal_only_when_confidently_different(resp, proposed):
                                             "no run was cancelled", "no run failed"]}
     ctx, calls = fake_ctx(resp, run_stats=lambda r, b: (START_STATS | {"runs": 7}, LATEST))
     assert "not enough recent runs: 7" in runs.start({"rule_id": "r1", "runbook_id": "rb1"}, ctx)["why"]
-    if proposed:  # half the window started by itself: today is already `auto`
-        ctx, _ = fake_ctx(resp, run_stats=lambda r, b: (START_STATS | {"auto_started_share": 0.5}, LATEST))
+    if proposed:  # the api says the pair already starts by itself
+        ctx, _ = fake_ctx(resp, run_stats=lambda r, b: (START_STATS, LATEST), starts=["auto"])
         assert runs.start({"rule_id": "r1", "runbook_id": "rb1"}, ctx)["why"] == "same as today"
     ctx, calls = fake_ctx(resp, run_stats=lambda r, b: (START_STATS, LATEST))
     ctx.rules["r1"]["enabled"] = False
