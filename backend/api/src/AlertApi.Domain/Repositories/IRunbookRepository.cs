@@ -6,6 +6,9 @@ public interface IRunbookRepository
 {
     Task<IReadOnlyList<Runbook>> GetAllAsync(string? teamId, CancellationToken cancellationToken = default);
 
+    // The team's active runbooks that have a canonical form, ordered by id: the order the lookup by `matches` tries them in.
+    Task<IReadOnlyList<Runbook>> GetActiveByTeamAsync(string teamId, CancellationToken cancellationToken = default);
+
     Task<Runbook?> GetByIdAsync(string id, CancellationToken cancellationToken = default);
 
     Task<bool> ExistsAsync(string id, CancellationToken cancellationToken = default);

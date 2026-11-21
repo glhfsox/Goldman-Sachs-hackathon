@@ -65,7 +65,7 @@ Learning from incidents: when an alert is resolved after people ran actions on i
 that alert's timeline and files a proposal of kind `runbook` ([api.md](api.md)) whose `matches` is the
 alert's `type` and `env` and whose steps are the actions that were run. The team accepts or rejects it.
 
-Which runbook an alert gets: the rule's `runbook_id`; otherwise the first active runbook of the team
+Which runbook an alert gets: the rule's `runbook_id`; otherwise the first active runbook of the team (ordered by id)
 whose `matches` is true for the alert's `sample_event`; otherwise none. An incident shows the runbooks of
 all its alerts, root cause first.
 
@@ -92,7 +92,7 @@ a call is the title and first step as text-to-speech.
 ### Automatic start and cancel
 
 When an alert is `opened` or `reopened` (a change not older than 5 minutes), the api looks at the runbook the alert names in `runbook_id`
-(it must be `active` and belong to the alert's team; the lookup by `matches` is not done yet), drafts the run as for a person and decides by the
+(it must be `active` and belong to the alert's team) or, when the rule names none, at the team's first `active` runbook, ordered by id, whose `matches` is true for the alert's `sample_event` (a runbook without `matches` is never picked; the first match is taken and, if it cannot start, no other is tried; a rule's `runbook_id` that cannot run is not replaced by a match), drafts the run as for a person and decides by the
 run's risk:
 
 | Risk | What happens |

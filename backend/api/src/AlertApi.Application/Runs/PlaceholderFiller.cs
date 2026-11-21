@@ -8,9 +8,6 @@ namespace AlertApi.Application.Runs;
 // {{...}} is not expanded again, and only strings are filled, never property names.
 public static partial class PlaceholderFiller
 {
-    private static readonly HashSet<string> EnvelopeFields =
-        ["source", "type", "severity", "env", "service", "ts", "dedup_hints", "raw"];
-
     public static FilledParams Fill(JsonElement? parameters, JsonElement envelope)
     {
         if (parameters is not { } value)
@@ -58,7 +55,7 @@ public static partial class PlaceholderFiller
         var segments = path.Split('.');
         var current = envelope;
 
-        if (current.ValueKind == JsonValueKind.Object && !EnvelopeFields.Contains(segments[0]))
+        if (current.ValueKind == JsonValueKind.Object && !Conditions.EnvelopeFields.Names.Contains(segments[0]))
         {
             if (!current.TryGetProperty("raw", out current))
             {

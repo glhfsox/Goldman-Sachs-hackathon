@@ -1,5 +1,8 @@
+using System.Text.Json;
+
 using Microsoft.Extensions.Logging;
 
+using AlertApi.Application.Conditions;
 using AlertApi.Application.Interfaces;
 using AlertApi.Application.Runs;
 using AlertApi.Application.Serialization;
@@ -54,7 +57,7 @@ public sealed class RunAutomationService : IRunAutomation
 
         var now = _timeProvider.GetUtcNow();
 
-        if (alert.Status != Alert.Open || string.IsNullOrWhiteSpace(alert.RunbookId))
+        if (alert.Status != Alert.Open)
         {
             return;
         }
@@ -66,12 +69,10 @@ public sealed class RunAutomationService : IRunAutomation
             return;
         }
 
-        var runbook = await _runbooks.GetByIdAsync(alert.RunbookId, cancellationToken);
+        var runbook = await FindRunbookAsync(alert, cancellationToken);
 
-        if (runbook is null || runbook.Status != Runbook.Active || runbook.Canonical is null || runbook.TeamId != alert.TeamId)
+        if (runbook is null)
         {
-            _logger.LogInformation("Alert {AlertId} names runbook {RunbookId}, which cannot run.", alert.Id, alert.RunbookId);
-
             return;
         }
 
@@ -130,6 +131,52 @@ public sealed class RunAutomationService : IRunAutomation
         {
             await _events.AddAsync(RunTimeline.Create($"run-finished:{run.Id}", run, Actor, $"run_{ended}", now), cancellationToken);
         }
+    }
+
+    // The rule's runbook_id wins and has no fallback; without one, the team's first active runbook (by id) whose `matches`
+    // is true for the alert's event (contracts/runbooks.md §1).
+    private async Task<Runbook?> FindRunbookAsync(Alert alert, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(alert.RunbookId))
+        {
+            var named = await _runbooks.GetByIdAsync(alert.RunbookId, cancellationToken);
+
+            if (named is null || named.Status != Runbook.Active || named.Canonical is null || named.TeamId != alert.TeamId)
+            {
+                _logger.LogInformation("Alert {AlertId} names runbook {RunbookId}, which cannot run.", alert.Id, alert.RunbookId);
+
+                return null;
+            }
+
+            return named;
+        }
+
+        JsonElement envelope;
+
+        try
+        {
+            envelope = RecordJson.ToElement(alert.SampleEvent);
+        }
+        catch (JsonException exception)
+        {
+            _logger.LogWarning(exception, "Alert {AlertId} has an unreadable event; no runbook lookup.", alert.Id);
+
+            return null;
+        }
+
+        foreach (var candidate in await _runbooks.GetActiveByTeamAsync(alert.TeamId, cancellationToken))
+        {
+            var canonical = RecordJson.ToElement(candidate.Canonical!);
+
+            if (canonical.ValueKind == JsonValueKind.Object
+                && canonical.TryGetProperty("matches", out var matches)
+                && ConditionEvaluator.Evaluate(matches, envelope))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     public async Task StageCancelAsync(string alertId, string actor, CancellationToken cancellationToken = default)
