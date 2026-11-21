@@ -122,5 +122,10 @@ public sealed class SourceServiceTests
 
             return Task.FromResult(0);
         }
+
+        public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
     }
 }

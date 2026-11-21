@@ -92,7 +92,8 @@ Each item of `notifications` carries what the UI needs for "why you got this / w
 
 Each item of `timeline` is an `alert_events` row `{id, alert_id, at, actor, kind, data}`
 ([schemas/api.md](schemas/api.md)). For the `action_*` kinds, `data` is
-`{"action_run": {id, runbook_id, step_index, action, params, status, result}}`.
+`{"action_run": {id, runbook_id, step_index, action, params, status, result}}`; `action_finished`, written by the executor
+once per attempt of a step, also has `run_id`, `node_id` and `attempt` (example in [schemas/api.md](schemas/api.md)).
 
 A proposal of kind `runbook` has the body `{team_id, title, canonical}`, where `canonical` is a
 canonical runbook ([runbooks.md](runbooks.md)). The ai-worker files one when an alert is resolved after

@@ -139,6 +139,22 @@ public class ActionRun
         }
     }
 
+    // The executor's verdict on the call it claimed; the lease ends with it.
+    public void Finish(bool ok, string result, DateTimeOffset at)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(result);
+
+        if (Status != Running)
+        {
+            throw new InvalidOperationException($"Node '{NodeId}' is {Status}, not running.");
+        }
+
+        Status = ok ? Succeeded : Failed;
+        Result = result;
+        FinishedAt = at;
+        LeaseUntil = null;
+    }
+
     // A person ticked a text-only step.
     public void Tick(DateTimeOffset at)
     {

@@ -60,6 +60,9 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 | `DATABASE_URL` | all backend services, each its own value | `postgres://alerts:alerts@processor-db:5432/processor` (hosts and database names: [storage.md](storage.md)) |
 | `API_URL` | ai-worker | `http://api:8000/api` (the REST base of [api.md](api.md), `/api` included) |
 | `REDIS_URL` | processor, notifier, api | `redis://redis:6379/0` |
+| `RUNBOOK_EXECUTOR` | api | `true` (default) runs the runbook executor in this replica; `false` for replicas that only serve REST, with one more container running it ([runbooks.md](runbooks.md) §2) |
+| `RUNBOOK_EXECUTION_ENABLED` | api | `true` (default). `false` is the kill switch: the executor starts but takes no step, so nothing runs until it is set back |
+| `RUNBOOK_CONCURRENCY`, `RUNBOOK_POLL_MS`, `RUNBOOK_LEASE_S` | api | Executor loops per replica (`4`), pause when idle (`1000`), claim length in seconds (`120`; a step's timeout is cut to fit) |
 | `PROCESSOR_WORKERS` | processor | `1` (default). Worker processes inside one container; each is a full replica with its own Kafka consumer in group `processor` |
 | `SMTP_HOST`, `SMTP_PORT` | notifier | `mailhog`, `1025` |
 | `SMS_GATEWAY_URL`, `CALL_GATEWAY_URL` | notifier | `http://mock-gateway:8002/sms`, `http://mock-gateway:8002/call` |

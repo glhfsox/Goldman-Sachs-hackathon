@@ -68,8 +68,33 @@ public class ApiDbContext : DbContext, IUnitOfWork
         }
     }
 
+    async Task<IUnitOfWorkTransaction> IUnitOfWork.BeginTransactionAsync(CancellationToken cancellationToken)
+    {
+        return new Transaction(await Database.BeginTransactionAsync(cancellationToken));
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApiDbContext).Assembly);
+    }
+
+    private sealed class Transaction : IUnitOfWorkTransaction
+    {
+        private readonly Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction _inner;
+
+        public Transaction(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction inner)
+        {
+            _inner = inner;
+        }
+
+        public async Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            await _inner.CommitAsync(cancellationToken);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _inner.DisposeAsync();
+        }
     }
 }
