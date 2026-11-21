@@ -89,6 +89,22 @@ a call is the title and first step as text-to-speech.
    throws is a failed step. A failed run leaves the alert open for a person; nothing in the loop waits for a click. A run can be
    cancelled at any time: a step already running finishes and keeps its result, nothing moves on.
 
+### Automatic start and cancel
+
+When an alert is `opened` or `reopened` (a change not older than 5 minutes), the api looks at the runbook the alert names in `runbook_id`
+(it must be `active` and belong to the alert's team; the lookup by `matches` is not done yet), drafts the run as for a person and decides by the
+run's risk:
+
+| Risk | What happens |
+|---|---|
+| `read_only` | The run starts at once: `trigger: auto`, status `running`, no `approved_by`. |
+| `auto` | Only when a person accepted this version and `runbook_starts` has `auto` for the rule and runbook: the run is `scheduled` with `start_at` = now + `RUNBOOK_CANCEL_WINDOW_S` (30 s). The executor loops start it when `start_at` passes. |
+| `approval` | Nothing starts; a person starts it. |
+
+Interim, until the risk check (#75, step 5): a `scheduled` run starts at `start_at` without a verdict. A broken or unknown runbook is logged and skipped,
+never an error for the Kafka record. One run per `opened` record (`trigger_change_id` is unique) and one live run per alert. A `resolved`
+alert, by a person (`POST /alerts/{id}/resolve`) or by the processor, cancels the alert's live run.
+
 ## 3. Extension points: one file plus one config entry each
 
 Signatures are language-neutral; arguments and results are JSON-shaped.

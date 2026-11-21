@@ -59,6 +59,7 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasColumnName("if_step");
 
                     b.Property<DateTimeOffset?>("LeaseUntil")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("lease_until");
 
@@ -709,6 +710,10 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("trigger");
 
+                    b.Property<string>("TriggerChangeId")
+                        .HasColumnType("text")
+                        .HasColumnName("trigger_change_id");
+
                     b.HasKey("Id")
                         .HasName("PK_runbook_runs");
 
@@ -717,6 +722,15 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasDatabaseName("UQ_runbook_runs_live_alert")
                         .HasFilter("status in ('scheduled', 'running')");
 
+                    b.HasIndex("StartAt")
+                        .HasDatabaseName("IX_runbook_runs_scheduled_start_at")
+                        .HasFilter("status = 'scheduled'");
+
+                    b.HasIndex("TriggerChangeId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_runbook_runs_trigger_change_id")
+                        .HasFilter("trigger_change_id is not null");
+
                     b.HasIndex("AlertId", "CreatedAt")
                         .HasDatabaseName("IX_runbook_runs_alert_id_created_at");
 
@@ -724,6 +738,39 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasDatabaseName("IX_runbook_runs_status_finished_at");
 
                     b.ToTable("runbook_runs", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.RunbookStart", b =>
+                {
+                    b.Property<string>("RuleId")
+                        .HasColumnType("text")
+                        .HasColumnName("rule_id");
+
+                    b.Property<string>("RunbookId")
+                        .HasColumnType("text")
+                        .HasColumnName("runbook_id");
+
+                    b.Property<string>("SetBy")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("set_by");
+
+                    b.Property<string>("Start")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("start");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("RuleId", "RunbookId")
+                        .HasName("PK_runbook_starts");
+
+                    b.ToTable("runbook_starts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_runbook_starts_start", "start in ('auto', 'approval')");
+                        });
                 });
 
             modelBuilder.Entity("AlertApi.Domain.Models.SchemaSample", b =>

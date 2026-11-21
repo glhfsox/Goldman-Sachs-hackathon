@@ -83,14 +83,7 @@ public sealed class RunService : IRunService
             draft.Risk,
             user,
             now);
-        var nodes = draft.Nodes.Select(node => ToRow(run, node)).ToList();
-
-        // A step the alert has no value for never runs with an empty one: it starts blocked.
-        foreach (var node in nodes.Where((_, index) => draft.Nodes[index].Missing.Count > 0))
-        {
-            node.MoveTo(ActionRun.Blocked, null, now);
-        }
-
+        var nodes = RunNodes.Create(run, draft, now);
         var ended = RunProgress.Apply(run, nodes, now);
 
         await _runs.AddAsync(run, nodes, cancellationToken);
@@ -171,30 +164,6 @@ public sealed class RunService : IRunService
         return RunNodeResponse.From(target);
     }
 
-    private static ActionRun ToRow(RunbookRun run, DraftNode node)
-    {
-        var step = node.Step;
-
-        return ActionRun.Create(
-            run.Id,
-            run.AlertId,
-            run.RunbookId,
-            step.Id,
-            step.Index,
-            node.Text,
-            step.Action,
-            node.Params?.GetRawText(),
-            node.Risk,
-            node.TargetId,
-            node.TargetVersion,
-            node.Request,
-            JsonSerializer.Serialize(node.Needs),
-            step.If?.Step,
-            step.If?.Status,
-            step.Retries,
-            step.TimeoutSeconds);
-    }
-
     private async Task AddEventAsync(
         string id,
         RunbookRun run,
@@ -204,11 +173,7 @@ public sealed class RunService : IRunService
         CancellationToken cancellationToken,
         string? node = null)
     {
-        var data = JsonSerializer.Serialize(
-            new { Run = new { run.Id, run.RunbookId, run.Risk, run.Trigger, run.Status, Node = node } },
-            RecordJson.Options);
-
-        await _events.AddAsync(AlertEvent.Create(id, run.AlertId, at, actor, kind, data), cancellationToken);
+        await _events.AddAsync(RunTimeline.Create(id, run, actor, kind, at, node), cancellationToken);
     }
 
     private async Task<Alert> GetAlertAsync(string id, CancellationToken cancellationToken)

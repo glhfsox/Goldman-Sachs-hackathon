@@ -78,7 +78,7 @@ Owned by the api and read only by it, so it is not published on `config.changes`
 
 ### `runbook_runs`
 
-One run of a runbook on an alert (migration `AddRunbookRuns`). Indexed on `(status, finished_at)` and `(alert_id, created_at)`.
+One run of a runbook on an alert (migration `AddRunbookRuns`). Indexed on `(status, finished_at)`, `(alert_id, created_at)` and, for `scheduled` rows, `start_at`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -86,13 +86,25 @@ One run of a runbook on an alert (migration `AddRunbookRuns`). Indexed on `(stat
 | `alert_id`, `rule_id`, `team_id`, `runbook_id` | text, not null | `rule_id` and `team_id` are copied from the alert |
 | `runbook_version` | int, not null | The accepted version that was run |
 | `risk` | text, not null | `read_only`, `auto` or `approval`: the highest risk of any step, including steps an `if` may skip |
-| `trigger` | text, not null | `manual` (automatic start comes with step 4) |
+| `trigger` | text, not null | `manual` (a person started it) or `auto` (started by `opened` / `reopened`, migration `AddAutoRunStart`) |
 | `status` | text, not null | `scheduled`, `running`, `done`, `failed`, `cancelled`. Unique index `UQ_runbook_runs_live_alert` on `alert_id` where status is `scheduled` or `running`: one live run per alert |
-| `start_at` | timestamptz, not null | When the run starts; now for a manual run |
+| `start_at` | timestamptz, not null | When the run starts; now for a manual run or a `read_only` auto run, now + cancel window for an `auto`-risk run |
 | `approved_by`, `approved_at` | text, timestamptz | The person who started it by hand |
 | `created_at` | timestamptz, not null | |
 | `started_at`, `finished_at` | timestamptz | |
-| `cancelled_by` | text | |
+| `cancelled_by` | text | The person, or the processor (`auto`) when the alert resolved on its own |
+| `trigger_change_id` | text | `change_id` of the `opened` / `reopened` record that started it; unique index `UQ_runbook_runs_trigger_change_id` where not null, so a repeated record starts one run |
+
+### `runbook_starts`
+
+How runs of one runbook on one rule start (migration `AddAutoRunStart`). No row means `approval`. Only an `auto`-risk run reads it.
+
+| Column | Type | Notes |
+|---|---|---|
+| `rule_id`, `runbook_id` | text, primary key together | |
+| `start` | text, not null | `auto` or `approval` (check constraint) |
+| `set_by` | text, not null | Person who accepted the `runbook_start` proposal |
+| `updated_at` | timestamptz, not null | |
 
 ### `action_runs`
 

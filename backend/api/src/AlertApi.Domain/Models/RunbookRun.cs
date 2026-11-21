@@ -11,6 +11,7 @@ public class RunbookRun
     public const string Cancelled = "cancelled";
 
     public const string Manual = "manual";
+    public const string Auto = "auto";
 
     private RunbookRun()
     {
@@ -47,6 +48,9 @@ public class RunbookRun
     public DateTimeOffset? FinishedAt { get; private set; }
 
     public string? CancelledBy { get; private set; }
+
+    // The alert change that started this run; unique, so a record Kafka delivers twice starts one run.
+    public string? TriggerChangeId { get; private set; }
 
     public bool IsLive => Status is Scheduled or Running;
 
@@ -86,6 +90,48 @@ public class RunbookRun
             ApprovedAt = now,
             CreatedAt = now,
             StartedAt = now
+        };
+    }
+
+    // `read_only` runs start at once; an `auto` run waits for its cancel window (`startAt` later than `now`).
+    // Nobody approved it: the risk check of step 5 and the rule's start mode stand in for a person.
+    public static RunbookRun StartAutomatically(
+        string id,
+        string alertId,
+        string ruleId,
+        string teamId,
+        string runbookId,
+        int runbookVersion,
+        string risk,
+        string triggerChangeId,
+        DateTimeOffset startAt,
+        DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(alertId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(teamId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runbookId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(risk);
+        ArgumentException.ThrowIfNullOrWhiteSpace(triggerChangeId);
+
+        var immediate = startAt <= now;
+
+        return new RunbookRun
+        {
+            Id = id,
+            AlertId = alertId,
+            RuleId = ruleId,
+            TeamId = teamId,
+            RunbookId = runbookId,
+            RunbookVersion = runbookVersion,
+            Risk = risk,
+            Trigger = Auto,
+            Status = immediate ? Running : Scheduled,
+            StartAt = startAt,
+            CreatedAt = now,
+            StartedAt = immediate ? now : null,
+            TriggerChangeId = triggerChangeId
         };
     }
 

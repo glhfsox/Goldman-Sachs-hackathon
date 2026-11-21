@@ -21,7 +21,8 @@ public static class ApiFactory
         string environment,
         bool enableSwagger,
         string? redisUrl = null,
-        bool runExecutor = false)
+        bool runExecutor = false,
+        TimeProvider? clock = null)
     {
         var database = $"api_{Guid.NewGuid():N}";
         var builder = new Npgsql.NpgsqlConnectionStringBuilder(postgres.ConnectionString);
@@ -48,6 +49,12 @@ public static class ApiFactory
             // Tests feed records to the handler directly; no consumer should poll a broker that does not exist.
             host.ConfigureServices(services =>
             {
+                if (clock is not null)
+                {
+                    services.RemoveAll<TimeProvider>();
+                    services.AddSingleton(clock);
+                }
+
                 var consumer = services.Single(descriptor => descriptor.ImplementationType == typeof(ActivityConsumer));
                 services.Remove(consumer);
 
