@@ -1,0 +1,18 @@
+name: burst
+description: Dedup test (AC-4) - the same settlement failure 500 times a minute for a minute, over light traffic.
+seed: 11
+background:
+  - {schema: trade_event, rate: 2}
+phases:
+  - name: burst
+    duration_s: 60
+    streams:
+      - schema: workflow_event
+        rate: 8.34  # 500 per minute
+        overrides:
+          type: WORKFLOW_FAILED
+          workflowName: order-settlement
+          step: settle
+          severity: critical
+          environment: prod
+          error: {code: TIMEOUT, message: "Counterparty service did not respond in 5000 ms"}

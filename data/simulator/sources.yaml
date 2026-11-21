@@ -1,0 +1,16 @@
+# Where each source id sends its events. Mirrors the registry in contracts/data/sources.md §1
+# (a test keeps the two in sync). Adding a source = one entry here plus a schema that uses it.
+#   kind: kafka -> published to `topic` on the sources cluster, message key taken from `key` (a dot path)
+#   kind: http  -> POST {INGEST_URL}/ingest/{source_id}
+workflows-kafka:
+  kind: kafka
+  topic: source.workflows
+  key: workflowId
+trades-kafka:
+  kind: kafka
+  topic: source.trades
+  key: payload.tradeId
+alertmanager-http:
+  kind: http
+pricing-logs-http:
+  kind: http
