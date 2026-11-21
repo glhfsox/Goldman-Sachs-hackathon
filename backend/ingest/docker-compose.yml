@@ -4,6 +4,8 @@ name: ingest
 
 include:
   - path: ../kafka/docker-compose.yml
+  # The sources cluster (`kafka-sources:9092`), so the kafka sources work in this one command.
+  - path: ../../data/kafka-sources/docker-compose.yml
 
 services:
   ingest-db:
@@ -33,4 +35,6 @@ services:
       ingest-db:
         condition: service_healthy
       kafka-init:
+        condition: service_completed_successfully
+      kafka-sources-init:
         condition: service_completed_successfully
