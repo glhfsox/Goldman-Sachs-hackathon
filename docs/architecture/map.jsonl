@@ -2,7 +2,7 @@
 {"id":"source_kafka","kind":"topic","area":"infra","purpose":"Separate Kafka cluster with source.* topics; third-party systems publish, only ingest consumes"}
 {"id":"ingest","kind":"service","area":"backend","purpose":"Source adapters: receive a payload, stamp event_id, source_id and received_at, enqueue it","in":["raw payload","source configs"],"out":["raw event"]}
 {"id":"events_raw","kind":"topic","area":"infra","purpose":"Kafka topic events.raw: durable buffer of raw events, keyed by source_id"}
-{"id":"processor","kind":"service","area":"backend","purpose":"Applies schema mappings, matches rules, deduplicates per rule, owns alert state, links incidents, auto-resolves quiet alerts","in":["raw event","rules","mappings"],"out":["alert change","schema sample"]}
+{"id":"processor","kind":"service","area":"backend","purpose":"Applies schema mappings (parks unmapped events until one arrives), matches rules, deduplicates, owns alert state, auto-resolves quiet alerts","in":["raw event","rules","mappings"],"out":["alert change","schema sample"]}
 {"id":"alerts_changes","kind":"topic","area":"infra","purpose":"Kafka topic alerts.changes: alert state changes, keyed by alert_id"}
 {"id":"config_changes","kind":"topic","area":"infra","purpose":"Kafka topic config.changes: compacted stream of rules, mappings, sources, teams, preferences and runbooks, keyed by kind:id"}
 {"id":"alerts_timeline","kind":"topic","area":"infra","purpose":"Kafka topic alerts.timeline: timeline entries written by services other than the API, keyed by alert_id"}
@@ -11,7 +11,7 @@
 {"id":"channels","kind":"external","purpose":"Delivery targets, mocked: MailHog SMTP and a logging SMS and call gateway"}
 {"id":"redis","kind":"store","area":"infra","purpose":"Alert counters and offsets already counted; pub/sub channel ui.alerts for live UI updates"}
 {"id":"ingest_db","kind":"store","area":"infra","purpose":"Ingest's own Postgres: its copy of source configs"}
-{"id":"processor_db","kind":"store","area":"infra","purpose":"Processor's own Postgres: alerts, incidents, outbox, and its copies of mappings, rules and the service map"}
+{"id":"processor_db","kind":"store","area":"infra","purpose":"Processor's own Postgres: alerts, incidents, outbox, parked unmapped events, and its copies of mappings, rules and the service map"}
 {"id":"notifier_db","kind":"store","area":"infra","purpose":"Notifier's own Postgres: notification outbox and its copies of alerts, rules, teams, on-call, preferences, runbooks"}
 {"id":"api_db","kind":"store","area":"infra","purpose":"API's own Postgres: all configuration, runbooks, timeline, action runs, proposals, and a read copy of alerts"}
 {"id":"ai_worker_db","kind":"store","area":"infra","purpose":"AI worker's own Postgres: its job queue (schema samples and runbook drafts to process)"}

@@ -26,15 +26,18 @@ THRESHOLDS = (1000, 100, 10)  # highest first: one count_threshold per flush
 # Caps on what an alert row stores and every change record ships; rules still see the full payload.
 TITLE_MAX, BODY_MAX, FIELD_MAX, RAW_MAX, PREVIEW_MAX = 300, 2000, 500, 16384, 2000
 MISS, RAISED = 0, 3
-FLUSH_LOCK, RESOLVE_LOCK = 0x666C757368, 0x7265736F6C7665  # "flush", "resolve"; relay.LOCK_ID is the outbox's
+FLUSH_LOCK, RESOLVE_LOCK, REPLAY_LOCK = 0x666C757368, 0x7265736F6C7665, 0x7265706C6179  # "flush", "resolve", "replay"; relay.LOCK_ID is the outbox's
 GRACE_S = 5  # auto-resolve waits this long past window_s: covers the lag of the once-per-second flush
+PARK_CAP, PARK_TTL_S, PARK_PAGE = 1000, 3600, 500  # parked events kept per fingerprint, how long, rows per replay page
+REPLAY = -1  # Item.partition of a replayed parked event; its offset is the parked row's seq
 
 # KEYS: alert hash, DIRTY. ARGV: partition, offset, last_seen ms, received ms, severity rank, ttl s, alert key.
+# A replayed parked event (partition -1) skips the watermark: seq order is not commit order across replicas.
 _HIT = """
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 local off = 'off:' .. ARGV[1]
 local w = redis.call('HGET', KEYS[1], off)
-if w and tonumber(ARGV[2]) <= tonumber(w) then return 1 end
+if ARGV[1] ~= '-1' and w and tonumber(ARGV[2]) <= tonumber(w) then return 1 end
 local n = redis.call('HINCRBY', KEYS[1], 'count', 1)
 redis.call('HSET', KEYS[1], off, ARGV[2])
 if tonumber(ARGV[3]) > tonumber(redis.call('HGET', KEYS[1], 'ls')) then redis.call('HSET', KEYS[1], 'ls', ARGV[3]) end
@@ -359,6 +362,7 @@ class Store:
         if not self.pg.execute("SELECT pg_try_advisory_lock(%s)", (RESOLVE_LOCK,)).fetchone()[0]:
             return 0
         try:
+            self.pg.execute("DELETE FROM parked_events WHERE created_at < %s", (now - timedelta(seconds=PARK_TTL_S),))
             return self._resolve_quiet(now)
         finally:
             self.pg.execute("SELECT pg_advisory_unlock(%s)", (RESOLVE_LOCK,))
@@ -413,21 +417,52 @@ class Store:
 
     # --- unmapped schemas ---
 
-    def save_samples(self, envelopes) -> None:
-        """Per new unmapped schema: one schema_samples row and one `schema.samples` outbox record; a burst of one schema costs one insert."""
-        new = {}
-        for env in envelopes:
-            if not env["mapped"] and (fp := fingerprint(env["source"], env["raw"])) not in self._seen:
-                new.setdefault(fp, env)
-        if not new:
+    def save_samples(self, pairs) -> None:
+        """(envelope, ids of the rules it matched) pairs; mapped envelopes are skipped. Parks every unmapped event (up to
+        PARK_CAP per schema) and, per new schema, writes one schema_samples row and one `schema.samples` outbox record."""
+        pairs = [(fingerprint(env["source"], env["raw"]), env, ids) for env, ids in pairs if not env["mapped"]]
+        if not pairs:
             return
+        new = {}
+        for fp, env, _ in pairs:
+            if fp not in self._seen:
+                new.setdefault(fp, env)
         with self.pg.transaction(), self.pg.cursor() as cur:
-            # the outbox row is written only when this replica inserted the fingerprint
-            cur.executemany(
-                "WITH s AS (INSERT INTO schema_samples (fingerprint, source_id, created_at) VALUES (%s, %s, %s)"
-                " ON CONFLICT DO NOTHING RETURNING fingerprint)"
-                " INSERT INTO outbox (topic, key, payload) SELECT %s, fingerprint, %s FROM s",
-                [(fp, env["source"], env["received_at"], SAMPLES_TOPIC,
-                  Jsonb({"fingerprint": fp, "source_id": env["source"], "sample": _capped_raw(env["raw"]), "seen_at": env["received_at"]}))
-                 for fp, env in new.items()])
+            if new:  # the outbox row is written only when this replica inserted the fingerprint
+                cur.executemany(
+                    "WITH s AS (INSERT INTO schema_samples (fingerprint, source_id, created_at) VALUES (%s, %s, %s)"
+                    " ON CONFLICT DO NOTHING RETURNING fingerprint)"
+                    " INSERT INTO outbox (topic, key, payload) SELECT %s, fingerprint, %s FROM s",
+                    [(fp, env["source"], env["received_at"], SAMPLES_TOPIC,
+                      Jsonb({"fingerprint": fp, "source_id": env["source"], "sample": _capped_raw(env["raw"]), "seen_at": env["received_at"]}))
+                     for fp, env in new.items()])
+            # shortcut: replicas parking the same schema at once can overshoot the cap by a batch each, lock per fingerprint if that matters
+            cur.execute("SELECT fingerprint, count(*) FROM parked_events WHERE fingerprint = ANY(%s) GROUP BY 1",
+                        (list({fp for fp, _, _ in pairs}),))
+            room, rows = {fp: PARK_CAP - n for fp, n in cur.fetchall()}, []
+            for fp, env, ids in pairs:
+                if (left := room.get(fp, PARK_CAP)) > 0:
+                    room[fp] = left - 1
+                    event = {"event_id": env["event_id"], "source_id": env["source"], "received_at": env["received_at"],
+                             "payload": env["raw"]}  # all build_envelope reads
+                    rows.append((env["event_id"], fp, Jsonb(event), ids))
+            if rows:
+                cur.executemany("INSERT INTO parked_events (event_id, fingerprint, event, matched_rules) VALUES (%s, %s, %s, %s)"
+                                " ON CONFLICT (event_id) DO NOTHING", rows)
         self._seen.update(new)
+
+    def replay_parked(self, replay) -> bool:
+        """Page parked events in seq order; `replay(rows)` gets (seq, event, matched_rules) tuples and returns the seqs it
+        applied, which are deleted. One replica at a time: False, and nothing done, while another holds the lock."""
+        if not self.pg.execute("SELECT pg_try_advisory_lock(%s)", (REPLAY_LOCK,)).fetchone()[0]:
+            return False
+        try:
+            after = 0
+            while rows := self.pg.execute("SELECT seq, event, matched_rules FROM parked_events WHERE seq > %s ORDER BY seq LIMIT %s",
+                                          (after, PARK_PAGE)).fetchall():
+                if done := replay(rows):
+                    self.pg.execute("DELETE FROM parked_events WHERE seq = ANY(%s)", (done,))
+                after = rows[-1][0]
+        finally:
+            self.pg.execute("SELECT pg_advisory_unlock(%s)", (REPLAY_LOCK,))
+        return True
