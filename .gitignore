@@ -21,3 +21,7 @@ node_modules/
 *.ckpt
 *.safetensors
 *.onnx
+
+# .NET
+bin/
+obj/

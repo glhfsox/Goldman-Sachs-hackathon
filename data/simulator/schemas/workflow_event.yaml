@@ -1,0 +1,28 @@
+name: workflow_event
+source: workflows-kafka
+description: Workflow engine failures and recoveries (contracts/data/sources.md §4.1)
+fields:
+  type: {$choice: [WORKFLOW_FAILED, WORKFLOW_STEP_SLOW, WORKFLOW_RECOVERED], $weights: [8, 1, 1]}
+  workflowId: {$pattern: "WF-{date}-{seq:04d}"}
+  workflowName:
+    $choice: [order-settlement, trade-booking, payment-release, eod-reconciliation]
+    $weights: [4, 3, 2, 1]
+  step: {$choice: [validate, enrich, settle, confirm]}
+  severity:
+    $map: type
+    $values:
+      WORKFLOW_RECOVERED: info
+      WORKFLOW_STEP_SLOW: {$choice: [warning, info], $weights: [3, 1]}
+    $default: {$choice: [critical, error, warning], $weights: [3, 5, 2]}
+  environment: {$choice: [prod, staging, dev], $weights: [6, 3, 1]}
+  timestamp: {$now: iso_s}
+  error:
+    $if: {path: type, ne: WORKFLOW_RECOVERED}
+    code: {$choice: [TIMEOUT, REJECTED, VALIDATION_ERROR, DOWNSTREAM_5XX], $weights: [4, 2, 2, 2]}
+    message:
+      $map: error.code
+      $values:
+        TIMEOUT: {$choice: ["Counterparty service did not respond in 5000 ms", "Booking service did not respond in 3000 ms"]}
+        REJECTED: {$choice: ["Rejected by counterparty: insufficient limit", "Rejected by clearing house: cut-off passed"]}
+        VALIDATION_ERROR: {$choice: ["Missing settlement instruction", "Unknown counterparty LEI"]}
+        DOWNSTREAM_5XX: {$choice: ["Payments gateway returned HTTP 503", "Ledger service returned HTTP 500"]}

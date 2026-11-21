@@ -1,0 +1,28 @@
+name: log_record
+source: pricing-logs-http
+description: >-
+  Pricing engine log record as a log shipper would forward it (contracts/data/sources.md §4.4).
+  A small share is sent as a raw text line instead: that case stays unmapped on purpose.
+fields:
+  ts: {$now: iso_ms}
+  level: {$choice: [DEBUG, INFO, WARN, ERROR, FATAL], $weights: [2, 12, 3, 2, 0.2]}
+  service: {$choice: [pricing-engine-1, pricing-engine-2, pricing-engine-3, pricing-engine-4]}
+  instrument: {$choice: [EURUSD, USDJPY, GBPUSD, UST10Y, BUND10Y, GILT10Y]}
+  latency_ms:
+    $if: {path: level, in: [WARN, ERROR, FATAL]}
+    $map: level
+    $values:
+      WARN: {$int: [300, 999]}
+      ERROR: {$int: [1000, 5000]}
+      FATAL: {$int: [5000, 10000]}
+  msg:
+    $map: level
+    $values:
+      DEBUG: {$pattern: "Cache hit for {instrument}"}
+      INFO: {$pattern: "Published price for {instrument}"}
+      WARN: {$pattern: "Price calculation slow: {latency_ms} ms"}
+      ERROR: {$pattern: "Price calculation exceeded 1000 ms: cache miss ({latency_ms} ms)"}
+      FATAL: "Pricing loop crashed: out of memory"
+text:
+  share: 0.05
+  template: "{ts} {level} {service} instrument={instrument} {msg}"

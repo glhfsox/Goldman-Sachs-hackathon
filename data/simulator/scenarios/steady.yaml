@@ -1,0 +1,11 @@
+name: steady
+description: Background traffic, about 50 msg/s of every schema with natural mixes, until stopped.
+seed: 7
+phases:
+  - name: steady
+    duration_s: null
+    streams:
+      - {schema: workflow_event, rate: 8}
+      - {schema: trade_event, rate: 20}
+      - {schema: metric_alert, rate: 2}
+      - {schema: log_record, rate: 18}

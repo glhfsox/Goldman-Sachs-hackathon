@@ -9,12 +9,20 @@ Timestamps are ISO 8601 UTC with milliseconds. Ids are opaque strings (ULID or U
 | Response | Meaning |
 |---|---|
 | `202 {"event_id": "..."}` | Kafka has confirmed the event. Never returned earlier. |
-| `404` | Unknown or disabled `source_id` |
-| `503` | Kafka unavailable; the caller retries |
+| `404` | Unknown or disabled `source_id`, or a `source_id` of a `kafka` source (those are read from their topic only) |
+| `413` | Body larger than 64 KiB (65536 bytes) |
+| `503` | Kafka did not confirm within about 4 s; the caller retries |
+
+The body is the event: the `Content-Type` header is ignored. Errors are `application/problem+json`.
+
+OpenAPI spec: `http://localhost:8001/openapi/v1.json`; Swagger UI: `http://localhost:8001/swagger` (on with `ENABLE_SWAGGER=true`). A Postman collection for this endpoint is in `backend/ingest/postman/`.
 
 A Kafka source is a `sources` row of kind `kafka` naming a `source.*` topic on the separate sources
 cluster (`SOURCE_KAFKA_BROKERS`), e.g. `{"id": "workflows-kafka", "kind": "kafka", "config": {"topic": "source.workflows"}}`.
 Ingest consumes it and republishes each message to `events.raw` on the internal cluster in the same raw record. Ingest never parses, filters or transforms the payload.
+
+What the sources send (source ids, `source.*` topics and records, HTTP sender behaviour, payload catalog):
+[data/sources.md](data/sources.md).
 
 ## 2. Raw event: topic `events.raw`
 
@@ -29,7 +37,13 @@ Ingest consumes it and republishes each message to `events.raw` on the internal 
 }
 ```
 
-`payload` is the parsed JSON value when the body is valid JSON, otherwise the body as a string.
+`event_id` is a UUID string, unique per record, and the idempotency key for consumers. HTTP sources: UUID v7, new for
+every request (a sender retry gets a new id).
+Kafka sources: UUID v5 of `source_id`, topic, partition and offset (namespace `6f1c2b7e-3a45-4d8e-9b0a-5c7e2d4f8a11`, name `<source_id>/<topic>/<partition>/<offset>`), so a message read again after a crash gets the same `event_id`.
+Ingest reads a Kafka source's topic from its beginning on the first start and commits an offset only after Kafka confirmed the republished record.
+
+`payload` is the parsed JSON value when the body is valid JSON, otherwise the body as a string (bytes that are not valid UTF-8 become U+FFFD).
+The record key is `source_id`.
 `received_at` is the start of the latency measurement (ingest → delivery).
 
 ## 3. Envelope: built by the processor, never dropped

@@ -1,0 +1,21 @@
+name: trade_event
+source: trades-kafka
+description: Business events in a {meta, payload} envelope (contracts/data/sources.md §4.2). No severity field.
+fields:
+  meta:
+    schema: {$choice: [trade.rejected.v1, trade.amended.v1, trade.booked.v1], $weights: [3, 2, 5]}
+    producer:
+      $map: meta.schema
+      $values: {trade.booked.v1: booking-service}
+      $default: trade-gateway
+    ts: {$now: epoch_ms}
+  payload:
+    tradeId: {$pattern: "T-#####"}
+    desk: {$choice: [rates, fx, credit, equities], $weights: [4, 3, 2, 1]}
+    # median 4M, long tail: about 1 in 5 trades is above 10M (the Rates rule's threshold)
+    notional: {$lognormal: 4000000, $sigma: 1.2, $min: 10000, $max: 500000000, $round_to: 1000}
+    currency: {$choice: [EUR, USD, GBP, JPY, CHF], $weights: [4, 4, 2, 1, 1]}
+    reason:
+      $if: {path: meta.schema, eq: trade.rejected.v1}
+      $choice: [LIMIT_BREACH, SANCTIONS, BAD_CPTY, STALE_PRICE]
+      $weights: [4, 1, 2, 3]

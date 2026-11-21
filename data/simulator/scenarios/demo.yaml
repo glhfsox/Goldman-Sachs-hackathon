@@ -1,0 +1,113 @@
+name: demo
+description: >-
+  One bad morning at Kestrel Markets (data/README.md): a slow counterparty service sets off a settlement storm,
+  payments errors, pricing errors, a large rejected trade, a never-seen schema, then recovery. About 3.5 minutes.
+seed: 42
+
+# Normal business under every phase: nothing here should page anyone.
+background:
+  - schema: trade_event
+    rate: 2
+    overrides: {meta.schema: {$choice: [trade.booked.v1, trade.amended.v1], $weights: [4, 1]}}
+  - schema: log_record
+    rate: 2
+    text: false
+    overrides: {level: {$choice: [INFO, DEBUG], $weights: [4, 1]}}
+  - schema: workflow_event
+    rate: 0.2
+    overrides: {type: WORKFLOW_STEP_SLOW, environment: staging, severity: info}
+  - schema: metric_alert
+    rate: 0.1
+    overrides: {alertname: DiskFillingUp, labels.severity: info, labels.region: us-east, status: firing}
+
+phases:
+  - name: 1 quiet start
+    duration_s: 20
+
+  - name: 2 counterparty service slows down
+    duration_s: 20
+    streams:
+      - &counterparty_latency
+        schema: metric_alert
+        rate: 0.3
+        overrides:
+          alertname: HighLatency
+          labels: {service: counterparty-service, region: eu-west, severity: warning}
+          annotations.summary: "p99 latency 2.4 s over the last 5 minutes"
+          status: firing
+
+  - name: 3 settlement storm
+    duration_s: 40
+    streams:
+      - *counterparty_latency
+      - &settlement_storm
+        schema: workflow_event
+        rate: 8
+        overrides:
+          type: WORKFLOW_FAILED
+          workflowName: order-settlement
+          step: settle
+          severity: critical
+          environment: prod
+          error: {code: TIMEOUT, message: "Counterparty service did not respond in 5000 ms"}
+
+  - name: 4 knock-on errors in payments
+    duration_s: 30
+    streams:
+      - {<<: *settlement_storm, rate: 4}
+      - &payments_errors
+        schema: metric_alert
+        rate: 0.5
+        overrides:
+          alertname: HighErrorRate
+          labels: {service: payments-api, region: eu-west, severity: critical}
+          annotations.summary: "Error rate 12% over the last 5 minutes"
+          status: firing
+
+  - name: 5 pricing engine misses its cache
+    duration_s: 30
+    streams:
+      - {<<: *settlement_storm, rate: 2}
+      - {<<: *payments_errors, rate: 0.3}
+      - schema: log_record
+        rate: 3
+        text: false
+        overrides: {level: ERROR, service: pricing-engine-3, instrument: EURUSD}
+      - schema: log_record
+        rate: 1
+        text: false
+        overrides: {level: ERROR, service: pricing-engine-1, instrument: UST10Y}
+
+  - name: 6 large rejected trade on the rates desk
+    duration_s: 15
+    streams:
+      - schema: trade_event
+        count: 1
+        overrides:
+          meta: {schema: trade.rejected.v1, producer: trade-gateway}
+          payload: {tradeId: T-88121, desk: rates, notional: 25000000, currency: EUR, reason: LIMIT_BREACH}
+      - schema: trade_event  # below the 10M threshold: no alert expected
+        count: 3
+        overrides:
+          meta.schema: trade.rejected.v1
+          payload: {desk: rates, notional: {$int: [500000, 5000000]}, reason: STALE_PRICE}
+
+  - name: 7 a never-seen schema appears
+    duration_s: 20
+    streams:
+      - schema: k8s_event
+        rate: 0.5
+        overrides: {metadata.namespace: pricing, reason: BackOff}
+      - schema: log_record
+        rate: 0.5
+        text: true
+        overrides: {level: ERROR, service: pricing-engine-3, instrument: EURUSD}
+
+  - name: 8 recovery
+    duration_s: 30
+    streams:
+      - schema: workflow_event
+        count: 3
+        overrides: {type: WORKFLOW_RECOVERED, workflowName: order-settlement, step: settle, environment: prod}
+      - {<<: *payments_errors, rate: 0, count: 1, overrides: {alertname: HighErrorRate, labels: {service: payments-api, region: eu-west, severity: critical}, annotations.summary: "Error rate back to 0.3%", status: resolved}}
+      - {<<: *counterparty_latency, rate: 0, count: 1, overrides: {alertname: HighLatency, labels: {service: counterparty-service, region: eu-west, severity: warning}, annotations.summary: "p99 latency back to 120 ms", status: resolved}}
