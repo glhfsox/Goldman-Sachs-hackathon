@@ -10,6 +10,7 @@ using Ingest.Domain.Models;
 using Ingest.Domain.Repositories;
 using Ingest.Infrastructure.Data;
 using Ingest.Infrastructure.Kafka;
+using Ingest.Infrastructure.Logging;
 using Ingest.Infrastructure.Registry;
 using Ingest.Infrastructure.Repositories;
 
@@ -37,9 +38,11 @@ public sealed class ConfigChangesConsumerTests : IClassFixture<PostgresFixture>,
         using var consumer = new ConfigChangesConsumer(
             provider.GetRequiredService<IServiceScopeFactory>(),
             _kafka.Brokers,
-            NullLogger<ConfigChangesConsumer>.Instance);
+            NullLogger<ConfigChangesConsumer>.Instance,
+            new LogThrottle(TimeSpan.Zero, TimeProvider.System));
         using var refresher = new SourceRegistryRefresher(
-            registry, TimeSpan.FromMilliseconds(200), NullLogger<SourceRegistryRefresher>.Instance);
+            registry, TimeSpan.FromMilliseconds(200), NullLogger<SourceRegistryRefresher>.Instance,
+            new LogThrottle(TimeSpan.Zero, TimeProvider.System));
         await consumer.StartAsync(CancellationToken.None);
         await refresher.StartAsync(CancellationToken.None);
 
