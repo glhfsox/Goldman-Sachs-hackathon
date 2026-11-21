@@ -1,0 +1,105 @@
+{
+  "config": {
+    "rate": 9000,
+    "duration_s": 120,
+    "probes": 100,
+    "started": "20261121070611",
+    "machine": "one machine (Darwin arm64, Docker); all services share the host clock, so cross-service latencies are comparable"
+  },
+  "throughput": {
+    "window_s": 126.6,
+    "ingested_per_s": 7991.4,
+    "processed_per_s": 7991.4,
+    "peak_ingested_per_s": 34688.4,
+    "peak_processed_per_s": 26316.4,
+    "lag_at_load_end": 0,
+    "drain_s": 0.5,
+    "simulator": {
+      "sent": 1011682,
+      "failed": 0,
+      "processes": 3,
+      "summary": "done in 122.1 s: generated 322260, sent 322260, failed 0, retries 0, 2639 msg/s | done in 125.7 s: generated 353370, sent 353370, failed 0, retries 0, 2811 msg/s | done in 123.5 s: generated 336052, sent 336052, failed 0, retries 0, 2722 msg/s"
+    }
+  },
+  "latency_ms": {
+    "ingest_to_ui": {
+      "count": 100,
+      "p50": 92.99993515014648,
+      "p95": 296.00000381469727,
+      "p99": 463.0000591278076,
+      "max": 579.9999237060547
+    },
+    "ingest_to_email": {
+      "count": 100,
+      "p50": 95.99995613098145,
+      "p95": 298.0000972747803,
+      "p99": 465.9998416900635,
+      "max": 583.9998722076416
+    },
+    "ingest_to_sms": {
+      "count": 100,
+      "p50": 95.99995613098145,
+      "p95": 298.0000972747803,
+      "p99": 463.99998664855957,
+      "max": 583.9998722076416
+    }
+  },
+  "probes": {
+    "sent": 100,
+    "lost": 0,
+    "channel_not_sent": {}
+  },
+  "dedup": {
+    "background_events": 1011682,
+    "background_alerts_opened": 1,
+    "duplicate_ratio": 1.0
+  },
+  "jev": {
+    "eval_run_risk.py": {
+      "judge": "run_risk",
+      "cases": 30,
+      "right": 25,
+      "accuracy": 0.8333333333333334,
+      "dangerous_misses": 0,
+      "other_misses": 5,
+      "misses": [
+        "prod-log-shipping-retry",
+        "uat-trade-booking-retry",
+        "stg-settlement-25m",
+        "prod-restart-one-of-eight-pricing",
+        "prod-archive-job-retry"
+      ],
+      "repeat": 1,
+      "measured_at": "2026-11-21T07:08:34+00:00"
+    },
+    "eval_run_start.py": {
+      "judge": "run_start",
+      "cases": 16,
+      "right": 15,
+      "accuracy": 0.9375,
+      "dangerous_misses": 0,
+      "other_misses": 1,
+      "misses": [
+        "prod-pricing-restart-always-approved"
+      ],
+      "repeat": 1,
+      "measured_at": "2026-11-21T07:08:38+00:00"
+    },
+    "eval_severity.py": {
+      "judge": "severity",
+      "cases": 20,
+      "right": 16,
+      "accuracy": 0.8,
+      "dangerous_misses": 0,
+      "other_misses": 4,
+      "misses": [
+        "first-prod-payment-release-under-warning",
+        "first-prod-pricing-log-error",
+        "first-prod-disk-80-over-critical",
+        "hist-pricing-log-never-acked-over-error"
+      ],
+      "repeat": 1,
+      "measured_at": "2026-11-21T07:08:44+00:00"
+    }
+  }
+}

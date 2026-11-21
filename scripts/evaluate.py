@@ -118,14 +118,23 @@ class Run:
         sim = ROOT / "data/simulator/.venv/bin/sim"
         if not sim.exists():
             raise SystemExit("run `bash check.sh` in data/simulator first")
-        p = await asyncio.create_subprocess_exec(str(sim), "run", "load", "--rate", str(self.args.rate),
-                                                 "--duration", str(self.args.duration),
-                                                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-        err = (await p.communicate())[1].decode()
-        done = next((l for l in err.splitlines() if "[sim] done" in l), "")
-        sent, failed = (re.search(rf"{k} (\d+)", done) for k in ("sent", "failed"))
-        self.sim = {"sent": int(sent[1]) if sent else None, "failed": int(failed[1]) if failed else None,
-                    "summary": done.removeprefix("[sim] ").strip() or err[-500:]}
+        # one simulator process tops out near 4,500 msg/s, so the rate is split over enough of them
+        n = max(1, -(-self.args.rate // 4000))
+
+        async def one(i: int) -> tuple[int | None, int | None, str]:
+            p = await asyncio.create_subprocess_exec(str(sim), "run", "load", "--rate", str(self.args.rate // n),
+                                                     "--duration", str(self.args.duration), "--seed", str(i + 1),
+                                                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            err = (await p.communicate())[1].decode()
+            done = next((l for l in err.splitlines() if "[sim] done" in l), "")
+            sent, failed = (re.search(rf"{k} (\d+)", done) for k in ("sent", "failed"))
+            return (int(sent[1]) if sent else None, int(failed[1]) if failed else None,
+                    done.removeprefix("[sim] ").strip() or err[-500:])
+
+        runs = await asyncio.gather(*(one(i) for i in range(n)))
+        total = lambda k: None if any(r[k] is None for r in runs) else sum(r[k] for r in runs)
+        self.sim = {"sent": total(0), "failed": total(1), "processes": n,
+                    "summary": " | ".join(r[2] for r in runs)}
 
     async def probes(self):
         gap = self.args.duration / (self.args.probes + 1)

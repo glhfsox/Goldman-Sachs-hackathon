@@ -114,22 +114,25 @@ Any JSON works. An unknown shape appears in the UI as unmapped and gets a mappin
 
 ## Measured performance
 
-One full run on 21-11 (one Mac, Apple Silicon, every service in Docker Desktop, so all clocks are the same clock).
-Background load from the sources simulator at 3,000 msg/s for 120 s (90% Kafka, 10% HTTP), plus 100 probe events
-over HTTP, each opening its own alert routed to UI, email and SMS. Full report:
-[docs/evaluation/20261121065848.md](docs/evaluation/20261121065848.md).
+Two runs on 21-11 (one Mac, Apple Silicon, every service in Docker Desktop, so all clocks are the same clock).
+Background load from the sources simulator for 120 s (90% Kafka, 10% HTTP), plus 100 probe events over HTTP, each
+opening its own alert routed to UI, email and SMS. Full reports:
+[3,000 msg/s](docs/evaluation/20261121065848.md), [9,000 msg/s](docs/evaluation/20261121070611.md).
 
-| Metric | Result |
-|---|---|
-| Ingested (`events.raw`), sustained / peak | 2,955 / 4,778 events/s |
-| Processed (rules, dedup, alert state), sustained / peak | 2,955 / 5,524 events/s |
-| Processor lag at the end of the load / time to drain | 27 events / 1.0 s |
-| Sent by the simulator / failed | 354,780 / 0 |
-| Probes lost | 0 of 100 |
-| Ingest → alert visible in the UI (WebSocket), p50 / p95 / p99 | 82 / 133 / 150 ms |
-| Ingest → email sent (MailHog), p50 / p95 / p99 | 84 / 138 / 159 ms |
-| Ingest → SMS sent (mock gateway), p50 / p95 / p99 | 87 / 135 / 154 ms |
-| Background events that opened no new alert (dedup into open alerts) | 100% |
+| Metric | 3,000 msg/s asked | 9,000 msg/s asked |
+|---|---|---|
+| Sent by the simulator / failed | 354,780 / 0 | 1,011,682 / 0 (3 processes, about 8,200 msg/s: the generator on the same machine is the limit) |
+| Ingested (`events.raw`), sustained | 2,955 events/s | 7,991 events/s |
+| Processed (rules, dedup, alert state), sustained | 2,955 events/s | 7,991 events/s |
+| Processor lag at the end of the load / time to drain | 27 events / 1.0 s | 0 events / 0.5 s |
+| Probes lost | 0 of 100 | 0 of 100 |
+| Ingest → alert visible in the UI (WebSocket), p50 / p95 / p99 | 82 / 133 / 150 ms | 93 / 296 / 463 ms |
+| Ingest → email sent (MailHog), p50 / p95 / p99 | 84 / 138 / 159 ms | 96 / 298 / 466 ms |
+| Ingest → SMS sent (mock gateway), p50 / p95 / p99 | 87 / 135 / 154 ms | 96 / 298 / 464 ms |
+
+The processor kept up with everything that was sent in both runs (no lag left), so the ceiling is above 8,000
+events/s on this machine; a second load machine is needed to find it. Background events deduplicate into alerts that
+are already open, so they open no new alerts.
 
 The judges of the AI worker (TypeSafe Jev), on labelled cases (labels written with AI help, not yet reviewed):
 
@@ -140,7 +143,7 @@ The judges of the AI worker (TypeSafe Jev), on labelled cases (labels written wi
 | Rule severity proposal (lowers noisy rules, raises ones people rush to) | 16 of 20 (80%), the same on 3 repeats | 0 (never proposed a lower severity than it should) |
 
 Reproduce, with the stack up: `bash data/simulator/check.sh` once, then
-`set -a; . backend/ai-worker/.env; set +a; uv run scripts/evaluate.py --rate 3000 --duration 120 --probes 100`
+`set -a; . backend/ai-worker/.env; set +a; uv run scripts/evaluate.py --rate 9000 --duration 120 --probes 100`
 (`--skip-jev` without a TypeSafe key). It writes `docs/evaluation/<time>.md` and `.json`.
 
 ## What is mocked
