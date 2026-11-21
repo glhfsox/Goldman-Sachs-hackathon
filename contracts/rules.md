@@ -37,7 +37,8 @@ A node is a group `{"all": [node, ...]}`, a group `{"any": [node, ...]}`, or a l
 ## 3. Schema mapping (table `mappings`)
 
 Turns a raw payload into the envelope. Mappings are tried by `priority`, highest first; the first
-whose `match` is true wins. `match` sees only `source` and `raw.*`.
+whose `match` is true wins. `match` sees only `source` and `raw.*`. A mapping written by the AI worker gets
+priority 10, below seeded and human ones, so it can never take events from an existing mapping.
 
 ```json
 {

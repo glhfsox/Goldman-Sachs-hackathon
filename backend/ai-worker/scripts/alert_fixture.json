@@ -1,0 +1,47 @@
+{
+  "alert": {
+    "id": "ALERT_ID",
+    "rule_id": "settlements-workflow-failed",
+    "team_id": "settlements",
+    "incident_id": null,
+    "status": "resolved",
+    "severity": "critical",
+    "title": "order-settlement failed at step settle",
+    "body": "Counterparty service did not respond in 5000 ms",
+    "fields": {"step": "settle", "error.code": "TIMEOUT", "error.message": "Counterparty service did not respond in 5000 ms"},
+    "color": "red",
+    "count": 3,
+    "first_seen": "2026-11-20T10:15:01.000Z",
+    "last_seen": "2026-11-20T10:16:01.004Z",
+    "first_received_at": "2026-11-20T10:15:02.123Z",
+    "runbook_id": "settlement-timeout",
+    "acked_by": "marek",
+    "resolved_by": "marek",
+    "sample_event": {
+      "event_id": "01JD3K8Q2V7M9X4T6B0N5R1WEC", "source": "workflows-kafka", "type": "WORKFLOW_FAILED", "severity": "critical", "env": "prod",
+      "service": "order-settlement", "ts": "2026-11-20T10:15:01.000Z", "dedup_hints": ["order-settlement", "TIMEOUT"], "mapped": true, "mapping_id": "workflow-failed",
+      "received_at": "2026-11-20T10:15:02.123Z",
+      "raw": {"type": "WORKFLOW_FAILED", "workflowId": "WF-20261120-0042", "workflowName": "order-settlement",
+              "step": "settle", "severity": "critical", "environment": "prod", "timestamp": "2026-11-20T10:15:01Z",
+              "error": {"code": "TIMEOUT", "message": "Counterparty service did not respond in 5000 ms"}}
+    }
+  },
+  "timeline": [
+    {"id": "ev-1", "alert_id": "ALERT_ID", "at": "2026-11-20T10:15:02.180Z", "actor": "processor", "kind": "opened",
+     "data": {"severity": "critical"}},
+    {"id": "ev-2", "alert_id": "ALERT_ID", "at": "2026-11-20T10:15:03.412Z", "actor": "notifier", "kind": "notification_sent",
+     "data": {"notification": {"id": "n-1", "user_id": "marek", "channel": "sms", "status": "sent",
+                               "reason": "rule settlements-workflow-failed, on-call",
+                               "send_at": "2026-11-20T10:15:02.200Z", "sent_at": "2026-11-20T10:15:03.410Z", "error": null}}},
+    {"id": "ev-3", "alert_id": "ALERT_ID", "at": "2026-11-20T10:17:10.000Z", "actor": "marek", "kind": "acked", "data": {}},
+    {"id": "ev-4", "alert_id": "ALERT_ID", "at": "2026-11-20T10:18:02.500Z", "actor": "marek", "kind": "action_finished",
+     "data": {"action_run": {"id": "run-1", "runbook_id": "settlement-timeout", "step_index": 0, "action": "http_get",
+                             "params": {"url": "http://counterparty-service/health"}, "status": "succeeded",
+                             "result": {"status_code": 200, "body": "{\"status\": \"UP\"}"}}}},
+    {"id": "ev-5", "alert_id": "ALERT_ID", "at": "2026-11-20T10:19:40.000Z", "actor": "marek", "kind": "action_finished",
+     "data": {"action_run": {"id": "run-2", "runbook_id": "settlement-timeout", "step_index": 1, "action": "retry_workflow",
+                             "params": {"workflowId": "WF-20261120-0042"}, "status": "succeeded",
+                             "result": {"workflow_status": "COMPLETED"}}}},
+    {"id": "ev-6", "alert_id": "ALERT_ID", "at": "2026-11-20T10:21:00.000Z", "actor": "marek", "kind": "resolved", "data": {}}
+  ]
+}
