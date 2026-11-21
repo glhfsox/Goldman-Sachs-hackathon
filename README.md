@@ -1,3 +1,5 @@
+> **Presentation:** [presentation/alpin-deck.pdf](presentation/alpin-deck.pdf)
+
 # Flexible Alerting & Notification Service
 
 ![throughput](https://img.shields.io/badge/throughput-8k_events%2Fs-2ea44f)
