@@ -63,7 +63,10 @@ median minutes to acknowledge, share resolved on their own without an ack, share
 mix, the window). The only user ids sent are those the rule's `route` names; the history's
 `acked_by` / `resolved_by` are not sent.
 
-`scripts/judge_demo.py` publishes a rule and 20 alerts' changes to Kafka and prints what the stub api received.
+`scripts/judge_demo.py` creates a rule through the api, publishes 20 alerts' changes to Kafka and prints the
+`rule_severity` proposals the api received; it works against the real api (checked 21-11: both proposals filed,
+accepting one as a person set the rule's `severity`) and the stub. A `404` on filing a proposal (the api has not read
+the alert from `alerts.changes` yet) retries the job instead of failing it.
 
 ## Run judges (`ai_worker/runs.py`, issue #75)
 
@@ -115,8 +118,9 @@ were written by the same hand that tuned the wording, so expect less on new case
   request, publishes the mappings and runbooks it saves to `config.changes`, and returns `scripts/alert_fixture.json`
   for any `GET /alerts/{id}` it was not given. It also plays the run side of issue #75: `GET /runs`, risk checks,
   approve (403 for a service actor), and a scheduled run with no verdict going to `waiting_approval` at `start_at`;
-  `POST /api/stub/runs` and `POST /api/stub/finished-runs` add runs for demos. Replace `API_URL` with the real api
-  once it serves these endpoints.
+  `POST /api/stub/runs` and `POST /api/stub/finished-runs` add runs for demos. The real api (`backend/api`) now
+  serves everything else the worker calls, proposals included; only the `/runs` endpoints are still stub-only, and
+  against the real api the run judges just wait (a `404` on `/runs` is logged once).
 
 ## What is sent to Claude
 

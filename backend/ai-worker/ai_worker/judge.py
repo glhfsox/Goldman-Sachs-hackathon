@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
 from .agent import JobFailed
-from .api import ApiError
+from .api import ApiError, file_proposal
 from .runbooks import _capped
 
 SEVERITIES = ("info", "warning", "error", "critical")
@@ -228,8 +228,8 @@ def handle(job_input: dict, ctx) -> dict:
         why = "same as the rule's severity" if sev["choice"] == current else f"confidence below {MIN_CONFIDENCE}"
         return {"proposed": None, "why": why, "answer": answer}
     reasons = [phrase for k, (_, phrase) in factors.items() if a[k]["noul"] >= FACTOR_P] + (_stat_reasons(s) if s else [])
-    p = ctx.api.post(f"/alerts/{quote(alert_id, safe='')}/proposals", {"kind": "rule_severity", "body": {
+    p = file_proposal(ctx.api, alert_id, "rule_severity", {
         "rule_id": rule_id, "team_id": rule.get("team_id"), "severity": sev["choice"], "current_severity": current,
         "confidence": sev["confidence"], "probabilities": answer["probabilities"], "mode": mode, "stats": s,
-        "reasons": reasons}})
+        "reasons": reasons})
     return {"proposal_id": p["id"], "proposed": sev["choice"], "answer": answer}

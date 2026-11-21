@@ -15,7 +15,7 @@ from urllib.parse import quote
 import psycopg
 from psycopg.types.json import Jsonb
 
-from .api import ApiError
+from .api import ApiError, file_proposal
 from .judge import FACTOR_P, _answers, _cap, _ts
 
 CLEAR_MIN = 0.6  # Jev must choose `clear` with at least this confidence, else the run is held
@@ -240,9 +240,9 @@ def start(job_input: dict, ctx) -> dict:
     if d["choice"] == current or d["confidence"] < START_MIN:
         why = "same as today" if d["choice"] == current else f"confidence below {START_MIN}"
         return {"proposed": None, "why": why, "answer": answer}
-    p = ctx.api.post(f"/alerts/{quote(latest['alert_id'], safe='')}/proposals", {"kind": "runbook_start", "body": {
+    p = file_proposal(ctx.api, latest["alert_id"], "runbook_start", {
         "rule_id": rule_id, "team_id": latest["team_id"], "runbook_id": runbook_id, "start": d["choice"],
         "current_start": current, "confidence": d["confidence"],
         "probabilities": {k: d["probabilities"][k] for k in ("auto", "approval")}, "stats": s,
-        "reasons": (_stat_reasons(s) + _factor_reasons(a))[:6]}})
+        "reasons": (_stat_reasons(s) + _factor_reasons(a))[:6]})
     return {"proposal_id": p["id"], "proposed": d["choice"], "answer": answer}

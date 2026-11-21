@@ -88,6 +88,9 @@ class Handler(BaseHTTPRequestHandler):
         if method == "PUT" and (m := re.fullmatch(r"/api/schema-samples/([^/]+)", path)):
             samples[m[1]] = body
             return self._send(200, body)
+        if method == "POST" and path == "/api/rules":
+            publish("rule", body)
+            return self._send(201, body)
         if method == "POST" and path == "/api/runbooks":
             rb = {"id": body.get("id") or f"rb-{uuid.uuid4().hex[:8]}", "team_id": body.get("team_id"),
                   "title": body.get("title"), "format": body.get("format"), "source": body.get("source"),

@@ -4,6 +4,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 TIMEOUT_S = 10
 
@@ -47,3 +48,14 @@ class Api:
                 err = raw.decode(errors="replace")
             raise ApiError(e.code, err) from None
         return json.loads(raw) if raw else None
+
+
+def file_proposal(api: Api, alert_id: str, kind: str, body: dict) -> dict:
+    """`POST /alerts/{id}/proposals`. The api learns of an alert from `alerts.changes` and may not have read it yet, so
+    its 404 raises a plain error, which retries the job, instead of ApiError, which fails it."""
+    try:
+        return api.post(f"/alerts/{quote(alert_id, safe='')}/proposals", {"kind": kind, "body": body})
+    except ApiError as e:
+        if e.status != 404:
+            raise
+        raise RuntimeError(f"the api does not know alert {alert_id} yet: {e}") from None
