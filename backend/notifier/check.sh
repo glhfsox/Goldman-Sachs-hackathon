@@ -7,6 +7,9 @@ cd "$(dirname "$0")"
 if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --list-sdks | grep -q '^10\.'; then
   curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
   bash /tmp/dotnet-install.sh --channel 10.0 --install-dir "$HOME/.dotnet" >/dev/null
+  # macOS kills a signed binary that was overwritten in place (cached signature): give the host a fresh inode.
+  cp "$HOME/.dotnet/dotnet" "$HOME/.dotnet/dotnet.new" && mv -f "$HOME/.dotnet/dotnet.new" "$HOME/.dotnet/dotnet"
+  export DOTNET_ROOT="$HOME/.dotnet"
   export PATH="$HOME/.dotnet:$PATH"
 fi
 

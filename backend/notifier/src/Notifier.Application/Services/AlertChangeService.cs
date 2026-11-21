@@ -171,6 +171,10 @@ public sealed class AlertChangeService : IAlertChangeService
                 Id: NotificationId.For(alert.Id, recipient.UserId, planned.Channel.Name, changeId))))
             .ToList();
 
+        // Held until the save at the end of HandleAsync: the "already notified" read below then sees every
+        // committed plan of this group.
+        await _notifications.LockGroupAsync(groupKey, cancellationToken);
+
         // Two queries for the whole plan instead of two per row.
         var existing = await _notifications.GetExistingIdsAsync(plan.Select(entry => entry.Id.Value).ToList(), cancellationToken);
         var alreadyNotified = await _notifications.GetNotifiedUsersAsync(

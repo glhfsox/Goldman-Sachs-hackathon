@@ -30,7 +30,7 @@ Shared rules: [../storage.md](../storage.md).
 | `error` | text | Last delivery error |
 | `created_at`, `updated_at` | timestamptz, not null | |
 
-- Indexes on (`status`, `send_at`), (`alert_id`), (`user_id`, `group_key`). Workers claim rows with
+- Indexes: partial on (`send_at`) where `status IN ('pending','failed')` (the claim), (`alert_id`), (`user_id`, `group_key`). Workers claim rows with
   `FOR UPDATE SKIP LOCKED` where `send_at <= now()`.
 - Every status change is published to Kafka `alerts.timeline` ([../events.md](../events.md) §7), which is
   how the api learns about deliveries.

@@ -72,6 +72,19 @@ public sealed class NotificationRepository : INotificationRepository
             .ToListAsync(cancellationToken);
     }
 
+    // A transaction-scoped advisory lock; NotifierDbContext.SaveChangesAsync commits the transaction and frees it.
+    public async Task LockGroupAsync(string groupKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupKey);
+
+        if (_context.Database.CurrentTransaction is null)
+        {
+            await _context.Database.BeginTransactionAsync(cancellationToken);
+        }
+
+        await _context.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtext({0}))", [groupKey], cancellationToken);
+    }
+
     // UI rows do not count: seeing a card in the feed is not "being notified" about the incident.
     public async Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
         IReadOnlyCollection<string> userIds,

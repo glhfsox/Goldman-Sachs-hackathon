@@ -43,7 +43,7 @@ public sealed class ConfigRepository : IConfigRepository
 
     public async Task<Runbook?> FindRunbookAsync(string id, CancellationToken cancellationToken = default)
     {
-        return await _context.Runbooks.AsNoTracking().FirstOrDefaultAsync(runbook => runbook.Id == id, cancellationToken);
+        return await _context.Runbooks.FirstOrDefaultAsync(runbook => runbook.Id == id, cancellationToken);
     }
 
     public async Task<IReadOnlyList<Membership>> GetMembershipsAsync(

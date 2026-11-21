@@ -111,6 +111,8 @@ public class Notification
         EnsureOpen("be sent");
 
         Status = NotificationStatus.Sent;
+        // The claim moved send_at to the lease end; a finished row reports when it really went out.
+        SendAt = now;
         Attempts++;
         Rendered = rendered;
         ProviderId = providerId;
@@ -137,6 +139,7 @@ public class Notification
         EnsureOpen("be given up");
 
         Status = NotificationStatus.Dead;
+        SendAt = now;
         Attempts++;
         Error = error;
         UpdatedAt = now;

@@ -201,8 +201,9 @@ namespace Notifier.Infrastructure.Migrations
                     b.HasIndex("AlertId")
                         .HasDatabaseName("IX_notifications_alert_id");
 
-                    b.HasIndex("Status", "SendAt")
-                        .HasDatabaseName("IX_notifications_status_send_at");
+                    b.HasIndex("SendAt")
+                        .HasDatabaseName("IX_notifications_due")
+                        .HasFilter("status IN ('pending', 'failed')");
 
                     b.HasIndex("UserId", "GroupKey")
                         .HasDatabaseName("IX_notifications_user_id_group_key");

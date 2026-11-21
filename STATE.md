@@ -18,6 +18,7 @@ Format: `- DD-MM HH:MM · **what** — what changed for others. Affects: zones. 
 - 21-11 00:02 · **Sources contract v1** — what simulated (and real) sources send to ingest: 4 source ids to seed (`workflows-kafka`, `trades-kafka`, `alertmanager-http`, `pricing-logs-http`), `source.workflows` / `source.trades` records on `kafka-sources`, one event per HTTP request or Kafka message, sender retry rules, payload catalog with field types and examples, deliberate edge cases, volume profiles. Affects: backend (ingest, processor seed mappings). Where: contracts/data/sources.md, contracts/events.md §1.
 
 ## SviatoslavShpylovyi — backend
+- 21-11 02:13 · **Notifier claim index is partial** — `notifications` is indexed on `send_at` where status is pending or failed; no column or record changed. Affects: none (internal to notifier). Where: contracts/schemas/notifier.md.
 
 ## oshuptar — frontend, presentation
 - 21-11 01:46 · **Open discussion: where ingest starts reading a new Kafka source topic** — today `auto.offset.reset=earliest`, so the first read of a `source.*` topic starts at its beginning and replays the backlog into `events.raw` (nothing a source sent is skipped, but a new source with a long history floods the processor). The alternative is `latest` (only new messages, backlog skipped). Not decided: tell oshuptar if the processor or the demo needs one of them. Affects: backend (processor), data. Where: contracts/events.md §2, backend/ingest/src/Ingest.Infrastructure/Adapters/KafkaSourceAdapter.cs.

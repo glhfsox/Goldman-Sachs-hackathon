@@ -4,6 +4,7 @@
 //   dotnet run --project backend/notifier/dev/LoadTest -- --label baseline-burst --alerts 2000 --rate 0
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 
@@ -63,6 +64,10 @@ await WaitAsync("config copies", TimeSpan.FromSeconds(60), async () =>
     await ScalarAsync<long>(db, "select count(*) from memberships where team_id = @p", team) == users.Count
     && await ScalarAsync<long>(db, "select count(*) from rules where id = @p", rule) == 1);
 
+// Empty MailHog so its total afterwards counts this run's emails, duplicates included.
+using var http = new HttpClient();
+await http.DeleteAsync($"{options.MailHog}/api/v1/messages");
+
 // 2. Alert changes the processor would publish: unique alert, change and event ids, so nothing is deduplicated.
 var expected = options.Alerts * users.Count * options.Channels.Length;
 var producedAt = new DateTime[options.Alerts];
@@ -80,7 +85,8 @@ for (var index = 0; index < options.Alerts; index++)
     }
 
     var now = DateTime.UtcNow;
-    producedAt[index] = now;
+    // Open-loop: latency starts at the scheduled send time, so a late producer does not hide queueing.
+    producedAt[index] = options.Rate > 0 ? started + TimeSpan.FromSeconds(index / (double)options.Rate) : now;
     var alertId = $"lt-{run}-a{index}";
     var record = new
     {
@@ -113,28 +119,46 @@ Console.WriteLine($"produced {options.Alerts} alert changes in {produceSeconds:0
 
 // 3. Wait until every notification of the run is final.
 var pattern = $"lt-{run}-a%";
+var alertIds = Enumerable.Range(0, options.Alerts).Select(index => $"lt-{run}-a{index}").ToArray();
 await WaitAsync("notifications to finish", TimeSpan.FromSeconds(options.TimeoutSeconds), async () =>
-    await ScalarAsync<long>(db, "select count(*) from notifications where alert_id like @p and status in ('sent','dead','cancelled','suppressed')", pattern) >= expected);
+{
+    // alert_id = any(...) uses IX_notifications_alert_id; LIKE 'x%' cannot under en_US.utf8 and would
+    // seq-scan the whole table every 100 ms while the notifier is being measured.
+    await using var command = db.CreateCommand(
+        "select count(*) from notifications where alert_id = any(@ids) and status in ('sent','dead','cancelled','suppressed')");
+    command.Parameters.AddWithValue("ids", alertIds);
+
+    return (long)(await command.ExecuteScalarAsync())! >= expected;
+});
 
 // 4. Timings.
 var rows = new List<Row>();
-await using (var command = db.CreateCommand("select alert_id, channel, status, created_at, sent_at from notifications where alert_id like @p"))
+await using (var command = db.CreateCommand("select id, alert_id, channel, status, created_at, sent_at from notifications where alert_id = any(@ids)"))
 {
-    command.Parameters.AddWithValue("p", pattern);
+    command.Parameters.AddWithValue("ids", alertIds);
     await using var reader = await command.ExecuteReaderAsync();
     while (await reader.ReadAsync())
     {
-        var alertIndex = int.Parse(reader.GetString(0)[(pattern.Length - 1)..], CultureInfo.InvariantCulture);
+        var alertIndex = int.Parse(reader.GetString(1)[(pattern.Length - 1)..], CultureInfo.InvariantCulture);
         rows.Add(new Row(
-            reader.GetString(1),
+            reader.GetString(0),
             reader.GetString(2),
+            reader.GetString(3),
             producedAt[alertIndex],
-            reader.GetDateTime(3).ToUniversalTime() - skew,
-            reader.IsDBNull(4) ? null : reader.GetDateTime(4).ToUniversalTime() - skew));
+            reader.GetDateTime(4).ToUniversalTime() - skew,
+            reader.IsDBNull(5) ? null : reader.GetDateTime(5).ToUniversalTime() - skew));
     }
 }
 
-var report = Report.Build(options, run, rows, expected, produceSeconds, skew);
+// The brief's end point: the timestamp the mock channel logs. Containers share the Docker VM clock.
+var mailbox = await http.GetFromJsonAsync<JsonElement>($"{options.MailHog}/api/v2/messages?limit=1");
+var emailsReceived = mailbox.GetProperty("total").GetInt32();
+var gatewayDeliveries = await http.GetFromJsonAsync<JsonElement>($"{options.Gateway}/deliveries?channel=sms&limit=1000000");
+var gatewayAt = gatewayDeliveries.EnumerateArray().ToDictionary(
+    delivery => delivery.GetProperty("notificationId").GetString()!,
+    delivery => delivery.GetProperty("receivedAt").GetDateTimeOffset().UtcDateTime);
+
+var report = Report.Build(options, run, rows, expected, produceSeconds, skew, emailsReceived, gatewayAt);
 Console.WriteLine(report);
 var output = Path.Combine(options.OutputDir, $"results-{options.Label}.md");
 Directory.CreateDirectory(options.OutputDir);
@@ -186,7 +210,7 @@ static async Task<TimeSpan> ClockSkewAsync(NpgsqlDataSource db)
     return TimeSpan.FromMilliseconds(samples[samples.Count / 2]);
 }
 
-internal sealed record Row(string Channel, string Status, DateTime ProducedAt, DateTime PlannedAt, DateTime? SentAt);
+internal sealed record Row(string Id, string Channel, string Status, DateTime ProducedAt, DateTime PlannedAt, DateTime? SentAt);
 
 internal sealed record Args(
     string Label,
@@ -198,7 +222,9 @@ internal sealed record Args(
     string Brokers,
     string Db,
     int TimeoutSeconds,
-    string OutputDir)
+    string OutputDir,
+    string MailHog,
+    string Gateway)
 {
     public static Args Parse(string[] args)
     {
@@ -212,7 +238,7 @@ internal sealed record Args(
 
         return new Args(
             Get("label", "run"),
-            Get("run-id", DateTime.UtcNow.ToString("HHmmss", CultureInfo.InvariantCulture)),
+            Get("run-id", DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)),
             int.Parse(Get("alerts", "1000"), CultureInfo.InvariantCulture),
             int.Parse(Get("rate", "0"), CultureInfo.InvariantCulture),
             int.Parse(Get("users", "3"), CultureInfo.InvariantCulture),
@@ -220,13 +246,16 @@ internal sealed record Args(
             Get("brokers", "localhost:9092"),
             Get("db", "Host=localhost;Port=5435;Database=notifier;Username=alerts;Password=alerts"),
             int.Parse(Get("timeout", "600"), CultureInfo.InvariantCulture),
-            Get("out", "dev/loadtest"));
+            Get("out", "dev/loadtest"),
+            Get("mailhog", "http://localhost:8025"),
+            Get("gateway", "http://localhost:8002"));
     }
 }
 
 internal static class Report
 {
-    public static string Build(Args options, string run, List<Row> rows, int expected, double produceSeconds, TimeSpan skew)
+    public static string Build(Args options, string run, List<Row> rows, int expected, double produceSeconds, TimeSpan skew,
+        int emailsReceived, IReadOnlyDictionary<string, DateTime> gatewayAt)
     {
         var sent = rows.Where(row => row.SentAt is not null).ToList();
         var builder = new StringBuilder();
@@ -240,6 +269,9 @@ internal static class Report
 
         var statuses = rows.GroupBy(row => row.Status).Select(group => $"{group.Key} {group.Count()}");
         builder.AppendLine($"Rows: {rows.Count} of {expected} ({string.Join(", ", statuses)}).");
+        var emailsSent = rows.Count(row => row.Channel == "email" && row.Status == "sent");
+        builder.AppendLine($"Duplicates: MailHog received {emailsReceived} emails for {emailsSent} sent email rows " +
+            $"({emailsReceived - emailsSent} extra). SMS duplicates are absorbed by the gateway's idempotency key.");
         if (sent.Count > 0)
         {
             var first = rows.Min(row => row.ProducedAt);
@@ -257,6 +289,13 @@ internal static class Report
             Line(builder, group.Key, "produced -> planned", group.Select(row => (row.PlannedAt - row.ProducedAt).TotalMilliseconds));
             Line(builder, group.Key, "planned -> sent", group.Select(row => (row.SentAt!.Value - row.PlannedAt).TotalMilliseconds));
             Line(builder, group.Key, "**produced -> sent**", group.Select(row => (row.SentAt!.Value - row.ProducedAt).TotalMilliseconds));
+        }
+
+        var smsAtGateway = sent.Where(row => row.Channel == "sms" && gatewayAt.ContainsKey(row.Id)).ToList();
+        if (smsAtGateway.Count > 0)
+        {
+            Line(builder, "sms", "**produced -> gateway received**",
+                smsAtGateway.Select(row => (gatewayAt[row.Id] - row.ProducedAt).TotalMilliseconds));
         }
 
         return builder.ToString();

@@ -17,9 +17,12 @@ public sealed class FakeChannel : IChannelAdapter
 
     public List<ChannelMessage> Sent { get; } = [];
 
+    public Action? OnSend { get; set; }
+
     public async Task<SendResult> SendAsync(ChannelRecipient recipient, ChannelMessage message, CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
+        OnSend?.Invoke();
         Sent.Add(message);
 
         return Result;

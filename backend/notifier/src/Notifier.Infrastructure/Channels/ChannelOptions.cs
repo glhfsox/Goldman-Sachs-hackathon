@@ -21,4 +21,8 @@ public sealed class ChannelOptions
 
     // Open SMTP connections kept between emails; also the most emails sent at the same time.
     public int SmtpPoolSize { get; init; } = 4;
+
+    // Connect, each SMTP command, and the wait for a free pooled connection. Must stay well under
+    // Delivery:LeaseSeconds, or a slow send outlives its lease and another replica sends it again.
+    public int SmtpTimeoutSeconds { get; init; } = 5;
 }

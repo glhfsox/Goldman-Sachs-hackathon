@@ -53,13 +53,15 @@ public sealed class DeliveryService : IDeliveryService
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<string>> ClaimDueAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<string>> ClaimDueAsync(int limit, CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
         var now = _clock.UtcNow;
 
         return await _notifications.ClaimDueAsync(
             now,
-            _options.BatchSize,
+            limit,
             now.AddSeconds(_options.LeaseSeconds),
             cancellationToken);
     }
@@ -84,10 +86,10 @@ public sealed class DeliveryService : IDeliveryService
         var now = _clock.UtcNow;
 
         // An ack can land between planning and sending; the alert copy is the last word.
-        var alert = await _alerts.FindAsync(notification.AlertId, cancellationToken);
-        if (alert is not null && !alert.IsOpen)
+        var alertStatus = await _alerts.GetStatusAsync(notification.AlertId, cancellationToken);
+        if (alertStatus is { } status && status != AlertStatus.Open)
         {
-            notification.Cancel($"suppressed by {alert.Status.ToString().ToLowerInvariant()}", now);
+            notification.Cancel($"suppressed by {status.ToString().ToLowerInvariant()}", now);
             await _timeline.AppendAsync(notification, AlertEventKinds.NotificationSuppressed, now, cancellationToken);
 
             return;
@@ -124,14 +126,23 @@ public sealed class DeliveryService : IDeliveryService
         }
 
         var folded = decision.Channel.IsPush && counter is not null ? counter.TakeFolded() : 0;
+        if (counter is not null)
+        {
+            // Commit the counter (ending its row lock) before the provider call, so sends to one person do not
+            // queue behind each other's network round trip. A failed send still counts, as before.
+            await _notifications.SaveChangesAsync(cancellationToken);
+        }
+
         var message = _renderer.Render(notification, folded);
         var result = await SendAsync(adapter, notification, message, cancellationToken);
 
         switch (result.Status)
         {
             case SendStatus.Sent:
-                notification.MarkSent(message.Body, result.ProviderId, now);
-                await _timeline.AppendAsync(notification, AlertEventKinds.NotificationSent, now, cancellationToken);
+                // sent_at is when the provider accepted the message, not when the attempt started.
+                var sentAt = _clock.UtcNow;
+                notification.MarkSent(message.Body, result.ProviderId, sentAt);
+                await _timeline.AppendAsync(notification, AlertEventKinds.NotificationSent, sentAt, cancellationToken);
                 break;
             case SendStatus.Retry when notification.Attempts + 1 < _options.MaxAttempts:
                 notification.ScheduleRetry(result.Error ?? "temporary failure", now + Backoff(notification.Attempts + 1), now);

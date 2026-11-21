@@ -153,4 +153,22 @@ public sealed class DeliveryServiceTests
         Assert.Equal(2, harness.Store.Notifications.Count(notification => notification.Status == NotificationStatus.Suppressed));
         Assert.Equal(2, harness.Store.RateCounters.Single().FoldedCount);
     }
+
+    [Fact]
+    public async Task The_push_counter_is_saved_before_the_provider_is_called()
+    {
+        var harness = new Harness();
+        var savesAtSend = -1;
+        var sms = new FakeChannel("sms", SendResult.Sent(null)) { OnSend = () => savesAtSend = harness.Repositories.SaveCalls };
+        harness.Channels.Adapters["sms"] = sms;
+        await harness.SeedRuleAsync("rule-1", ["sms"], "marek");
+        await harness.Config.ApplyAsync(Harness.ConfigRecord("preferences", "marek", new { user_id = "marek", max_push_per_hour = 5 }));
+        await harness.AlertChanges.HandleAsync(Harness.Change(AlertChanges.Opened));
+        var savesBeforeDelivery = harness.Repositories.SaveCalls;
+
+        await harness.DeliverDueAsync();
+
+        Assert.Single(sms.Sent);
+        Assert.Equal(savesBeforeDelivery + 1, savesAtSend);
+    }
 }

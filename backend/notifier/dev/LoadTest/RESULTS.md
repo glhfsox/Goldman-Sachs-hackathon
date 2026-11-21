@@ -35,9 +35,11 @@ Latency is produced → sent, all channels. In a burst it is mostly queueing tim
 
 ## Reproduce
 ```bash
+docker compose -f backend/notifier/docker-compose.dev.yml down   # no database volume: gives an empty table and an empty gateway log
 docker compose -f backend/notifier/docker-compose.dev.yml up -d --build
 docker run --rm --network notifier-dev_default -v <repo>/backend/notifier/dev/LoadTest:/src mcr.microsoft.com/dotnet/sdk:10.0 \
   sh -c "cd /src && dotnet run -c Release -- --label after-burst --alerts 1000 --rate 0 --brokers kafka:9092 \
-  --db 'Host=notifier-db;Port=5432;Database=notifier;Username=alerts;Password=alerts' --out /src"
+  --db 'Host=notifier-db;Port=5432;Database=notifier;Username=alerts;Password=alerts' --out /src \
+  --mailhog http://mailhog:8025 --gateway http://mock-gateway:8002"
 ```
 Per-run details: `results-*.md` in this folder.

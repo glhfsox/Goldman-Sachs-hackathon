@@ -8,18 +8,14 @@ namespace Notifier.Infrastructure.Repositories;
 
 public sealed class OutboxRepository : IOutboxRepository
 {
+    // Row locks are the lease: held until SaveChangesAsync commits the outcome, released at once if the worker dies.
     private const string ClaimPendingSql = """
-        UPDATE outbox
-        SET locked_until = {2}
-        WHERE id IN (
-            SELECT id
-            FROM outbox
-            WHERE processed_at IS NULL
-              AND (locked_until IS NULL OR locked_until <= {0})
-            ORDER BY sequence
-            LIMIT {1}
-            FOR UPDATE SKIP LOCKED)
-        RETURNING id, sequence, topic, key, payload, created_at, processed_at, attempts, error, locked_until
+        SELECT id, sequence, topic, key, payload, created_at, processed_at, attempts, error, locked_until
+        FROM outbox
+        WHERE processed_at IS NULL
+        ORDER BY sequence
+        LIMIT {0}
+        FOR UPDATE SKIP LOCKED
         """;
 
     private readonly NotifierDbContext _context;
@@ -40,8 +36,16 @@ public sealed class OutboxRepository : IOutboxRepository
         DateTime leaseUntil,
         CancellationToken cancellationToken = default)
     {
+        _ = now;
+        _ = leaseUntil;
+
+        if (_context.Database.CurrentTransaction is null)
+        {
+            await _context.Database.BeginTransactionAsync(cancellationToken);
+        }
+
         return await _context.OutboxMessages
-            .FromSqlRaw(ClaimPendingSql, now, batchSize, leaseUntil)
+            .FromSqlRaw(ClaimPendingSql, batchSize)
             .ToListAsync(cancellationToken);
     }
 

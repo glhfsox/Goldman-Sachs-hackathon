@@ -55,6 +55,8 @@ public sealed class FakeRepositories :
         return _store.Notifications.Where(notification => notification.AlertId == alertId && notification.IsOpen).ToList();
     }
 
+    public Task LockGroupAsync(string groupKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     public async Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
         IReadOnlyCollection<string> userIds,
         string groupKey,
@@ -102,6 +104,13 @@ public sealed class FakeRepositories :
         await Task.CompletedTask;
 
         return _store.Alerts.FirstOrDefault(alert => alert.Id == id);
+    }
+
+    public async Task<AlertStatus?> GetStatusAsync(string id, CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+
+        return _store.Alerts.FirstOrDefault(alert => alert.Id == id)?.Status;
     }
 
     public async Task AddAsync(Alert alert, CancellationToken cancellationToken = default)
@@ -262,8 +271,11 @@ public sealed class FakeRepositories :
         _store.ProcessedChanges.Add(change);
     }
 
+    public int SaveCalls { get; private set; }
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
+        SaveCalls++;
     }
 }

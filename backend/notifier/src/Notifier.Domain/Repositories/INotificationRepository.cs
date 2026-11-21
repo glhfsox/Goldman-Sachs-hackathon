@@ -15,6 +15,10 @@ public interface INotificationRepository
 
     Task<IReadOnlyList<Notification>> GetOpenByAlertAsync(string alertId, CancellationToken cancellationToken = default);
 
+    // Serializes planning for one group (incident) until the next save, so two alerts of one incident planned
+    // at the same time on other partitions or replicas still send one message per person.
+    Task LockGroupAsync(string groupKey, CancellationToken cancellationToken = default);
+
     // Of the given users, those already told about this group (incident) through another alert since `since`.
     Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
         IReadOnlyCollection<string> userIds,

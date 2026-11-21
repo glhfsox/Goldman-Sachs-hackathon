@@ -17,6 +17,8 @@ public sealed class ConfigChangesWorker : KafkaConsumerWorker<ConfigChangeMessag
 
     protected override string Topic => Topics.ConfigChanges;
 
+    protected override bool ReplayFromBeginning => true;
+
     protected override async Task HandleAsync(IServiceProvider services, ConfigChangeMessage message, CancellationToken cancellationToken)
     {
         var configChanges = services.GetRequiredService<IConfigChangeService>();

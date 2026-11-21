@@ -74,7 +74,7 @@ public sealed class Harness
     // What DeliveryWorker does, one notification after another: claim the due rows, then deliver each.
     public async Task DeliverDueAsync()
     {
-        foreach (var id in await Deliveries.ClaimDueAsync())
+        foreach (var id in await Deliveries.ClaimDueAsync(50))
         {
             await Deliveries.DeliverAsync(id);
         }

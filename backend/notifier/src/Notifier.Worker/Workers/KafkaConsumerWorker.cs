@@ -32,6 +32,9 @@ public abstract class KafkaConsumerWorker<TMessage> : BackgroundService
 
     protected abstract string Topic { get; }
 
+    // True for a compacted state topic that must be read whole on every start (config.changes).
+    protected virtual bool ReplayFromBeginning => false;
+
     protected abstract Task HandleAsync(IServiceProvider services, TMessage message, CancellationToken cancellationToken);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -39,7 +42,7 @@ public abstract class KafkaConsumerWorker<TMessage> : BackgroundService
         // Consume blocks the thread; yielding first lets the host finish starting the other workers.
         await Task.Yield();
 
-        using var consumer = _consumerFactory.Create();
+        using var consumer = _consumerFactory.Create(ReplayFromBeginning);
         consumer.Subscribe(Topic);
         try
         {

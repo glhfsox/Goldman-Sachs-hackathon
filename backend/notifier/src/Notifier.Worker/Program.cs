@@ -53,6 +53,7 @@ builder.Services.AddOptions<CleanupOptions>().Bind(builder.Configuration.GetSect
     .ValidateOnStart();
 builder.Services.AddOptions<ChannelOptions>().Bind(builder.Configuration.GetSection(ChannelOptions.SectionName))
     .Validate(options => options.Enabled.Length > 0, "Channels:Enabled must list at least one channel, e.g. [\"ui\", \"email\", \"sms\", \"call\"].")
+    .Validate(options => options.SmtpTimeoutSeconds > 0, "Channels:SmtpTimeoutSeconds must be positive.")
     .ValidateOnStart();
 
 builder.Services.AddDbContext<NotifierDbContext>(options =>

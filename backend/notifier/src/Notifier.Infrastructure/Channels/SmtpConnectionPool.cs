@@ -27,7 +27,12 @@ public sealed class SmtpConnectionPool : IDisposable
     // `fresh` skips idle connections: used to retry once after a reused connection turned out to be dead.
     public async Task<SmtpLease> RentAsync(bool fresh, CancellationToken cancellationToken = default)
     {
-        await _slots.WaitAsync(cancellationToken);
+        if (!await _slots.WaitAsync(TimeSpan.FromSeconds(_options.SmtpTimeoutSeconds), cancellationToken))
+        {
+            // EmailChannel treats TimeoutException as transient: the row is retried with backoff.
+            throw new TimeoutException($"No SMTP connection became free within {_options.SmtpTimeoutSeconds} s.");
+        }
+
         try
         {
             while (!fresh && _idle.TryTake(out var entry))
@@ -40,7 +45,7 @@ public sealed class SmtpConnectionPool : IDisposable
                 Close(entry.Client);
             }
 
-            var client = new SmtpClient();
+            var client = new SmtpClient { Timeout = _options.SmtpTimeoutSeconds * 1000 };
             try
             {
                 await client.ConnectAsync(_options.SmtpHost, _options.SmtpPort, SecureSocketOptions.None, cancellationToken);

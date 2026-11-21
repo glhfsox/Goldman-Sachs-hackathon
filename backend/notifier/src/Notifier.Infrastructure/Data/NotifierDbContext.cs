@@ -98,8 +98,10 @@ public class NotifierDbContext : DbContext
             entity.Property(notification => notification.CreatedAt).HasColumnName("created_at");
             entity.Property(notification => notification.UpdatedAt).HasColumnName("updated_at");
 
-            entity.HasIndex(notification => new { notification.Status, notification.SendAt })
-                .HasDatabaseName("IX_notifications_status_send_at");
+            // Only open rows are claimable; the claim's ORDER BY send_at LIMIT n walks this index and stops after n rows.
+            entity.HasIndex(notification => notification.SendAt)
+                .HasDatabaseName("IX_notifications_due")
+                .HasFilter("status IN ('pending', 'failed')");
             entity.HasIndex(notification => notification.AlertId).HasDatabaseName("IX_notifications_alert_id");
             entity.HasIndex(notification => new { notification.UserId, notification.GroupKey })
                 .HasDatabaseName("IX_notifications_user_id_group_key");

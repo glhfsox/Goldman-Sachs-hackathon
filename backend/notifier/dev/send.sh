@@ -10,7 +10,7 @@ topic="$1"
 file="$2"
 
 now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-substitute() { sed -e "s/__CHANGE_ID__/$(date +%s%N)/g" -e "s/__NOW__/$now/g"; }
+substitute() { sed -e "s/__CHANGE_ID__/$(date +%s)-$$-$RANDOM/g" -e "s/__NOW__/$now/g"; }
 
 if [[ "$file" == *.jsonl ]]; then
   lines="$(grep -v '^\s*$' "$file" | substitute)"
@@ -22,5 +22,5 @@ fi
 
 printf '%s\n' "$lines" | docker compose -f "$here/../docker-compose.dev.yml" exec -T kafka \
   /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic "$topic" \
-  --property parse.key=true --property key.separator='|'
+  --reader-property parse.key=true --reader-property key.separator='|'
 echo "sent $(printf '%s\n' "$lines" | wc -l) record(s) from $(basename "$file") to $topic"
