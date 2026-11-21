@@ -16,19 +16,19 @@ public static class SourceEndpoints
         var group = app.MapGroup("api/sources").WithTags("Sources");
 
         group.MapGet("", GetAll)
-            .WithName(nameof(GetAll))
+            .WithName("GetSources")
             .WithSummary("Lists the sources ingest reads from.");
 
         group.MapGet("{id}", GetById)
-            .WithName(nameof(GetById))
+            .WithName("GetSourceById")
             .WithSummary("Returns one source.");
 
         group.MapPost("", Create)
-            .WithName(nameof(Create))
+            .WithName("CreateSource")
             .WithSummary("Adds a source and publishes it on config.changes.");
 
         group.MapPut("{id}", Update)
-            .WithName(nameof(Update))
+            .WithName("UpdateSource")
             .WithSummary("Changes a source, or enables or disables it, and publishes it on config.changes.");
 
         return app;
@@ -60,7 +60,7 @@ public static class SourceEndpoints
     {
         var source = await service.CreateAsync(request, cancellationToken);
 
-        return TypedResults.CreatedAtRoute(source, nameof(GetById), new { id = source.Id });
+        return TypedResults.CreatedAtRoute(source, "GetSourceById", new { id = source.Id });
     }
 
     private static async Task<Ok<SourceResponse>> Update(

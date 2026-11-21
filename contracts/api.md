@@ -43,8 +43,9 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `POST /alerts/{id}/ack` | | `Alert` |
 | `POST /alerts/{id}/resolve` | | `Alert` |
 | `GET /rules?team=` | | `[Rule]` ([rules.md](rules.md)) |
-| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule` |
-| `GET /mappings`, `PUT /mappings/{id}` | `Mapping` | `Mapping`, or `422 invalid_mapping` |
+| `GET /rules/{id}` | | `Rule` |
+| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule`. `409 conflict` for a taken id on `POST`; on `PUT` the body `id` must equal the URL id |
+| `GET /mappings`, `PUT /mappings/{id}` | `Mapping` | `Mapping`, or `422 invalid_mapping`. `PUT` creates or replaces; `GET` lists highest `priority` first |
 | `GET /schema-samples?status=` | | unmapped schemas waiting for a mapping |
 | `GET /sources`, `GET /sources/{id}`, `POST /sources` | `{id, kind, config}` | `Source`. `id`: lowercase letters, digits, `-`; a `kafka` source needs `config.topic`; `422 invalid_source` otherwise, `409 conflict` for a taken id |
 | `PUT /sources/{id}` | `{kind, config, enabled}` | `Source` (also how a source is disabled) |
@@ -63,6 +64,8 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 
 Each item of `notifications` carries what the UI needs for "why you got this / why not":
 `{id, user_id, channel, status, reason, send_at, sent_at, error}`.
+
+The api accepts exactly what the processor reads: unknown fields, wrong types and unknown ops are `422`, and `details` has one entry per wrong path.
 
 Example invalid rule:
 

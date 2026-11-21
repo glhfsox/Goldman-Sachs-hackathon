@@ -27,6 +27,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IConfigChangeOutbox, ConfigChangeOutbox>();
 builder.Services.AddScoped<ISourceRepository, SourceRepository>();
 builder.Services.AddScoped<ISourceService, SourceService>();
+builder.Services.AddScoped<IRuleRepository, RuleRepository>();
+builder.Services.AddScoped<IRuleService, RuleService>();
+builder.Services.AddScoped<IMappingRepository, MappingRepository>();
+builder.Services.AddScoped<IMappingService, MappingService>();
 builder.Services.AddSingleton<IEventPublisher>(_ => new KafkaEventPublisher(kafkaBrokers));
 builder.Services.AddHostedService(provider => new OutboxPublisher(
     provider.GetRequiredService<IServiceScopeFactory>(),
@@ -67,6 +71,8 @@ if (apiDocsEnabled)
 
 app.MapHealthEndpoints();
 app.MapSourceEndpoints();
+app.MapRuleEndpoints();
+app.MapMappingEndpoints();
 
 app.Run();
 

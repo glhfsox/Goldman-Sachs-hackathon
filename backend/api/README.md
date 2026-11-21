@@ -4,7 +4,7 @@ REST and WebSocket for the UI; owns all configuration and publishes it on `confi
 Ports, env vars and topics: [contracts/services.md](../../contracts/services.md). Endpoints: [contracts/api.md](../../contracts/api.md).
 Tables: [contracts/schemas/api.md](../../contracts/schemas/api.md).
 
-Status: `/health`, the outbox publisher and the `/api/sources` endpoints. Other config kinds, alerts, WebSocket and runbooks are added in later PRs.
+Status: `/health`, the outbox publisher and the `/api/sources`, `/api/rules` and `/api/mappings` endpoints. Other config kinds, alerts, WebSocket and runbooks are added in later PRs.
 
 ## Run
 
