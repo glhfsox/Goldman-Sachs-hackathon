@@ -152,9 +152,9 @@ def run_agent(system: str, user: str, tool, *, thread_id: str, metrics: dict | N
         # the handler keeps what it saved in memory: re-run the calls the checkpoint already answered (validation,
         # and an idempotent PUT for a mapping), then go on from the checkpoint
         msgs = before["messages"]
-        for i, m in enumerate(msgs):
-            if m["role"] == "assistant" and i + 1 < len(msgs):
-                for b in m["content"]:
+        for i, msg in enumerate(msgs):
+            if msg["role"] == "assistant" and i + 1 < len(msgs):
+                for b in msg["content"]:
                     if b["type"] == "tool_use":
                         _run_tool(tool, b)
         log.info("resuming %s from its checkpoint after %d replies", thread_id, before["replies"])

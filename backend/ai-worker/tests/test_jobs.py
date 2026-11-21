@@ -204,6 +204,18 @@ def test_a_dropped_connection_leaves_the_job_pending_and_reconnect_finishes_it(w
         ("retry", "AdminShutdown", 1), ("done", None, 1)]  # an OperationalError
 
 
+def test_a_statement_that_always_fails_counts_an_attempt_instead_of_reconnecting(worker, metrics_file):
+    w, pg, behaviour, _ = worker
+    jobs.enqueue(pg, "schema:a", "mapping", {})
+
+    def deadlock(*_):  # an OperationalError of the job's own statement, on the claim connection
+        w.jobs_pg.execute("DO $$ BEGIN RAISE EXCEPTION USING ERRCODE = '40P01'; END $$")
+    behaviour.append(deadlock)
+    w.run_one()
+    status, attempts = rows(pg)[0][1:3]
+    assert (status, attempts) == ("pending", 1)
+
+
 class FakeMsg:
     def __init__(self, offset, value):
         self._offset, self._value = offset, value
@@ -289,3 +301,14 @@ def test_success_stores_result_and_ctx_has_its_parts(worker):
     ctx = calls[0]
     assert ctx.api == "api" and ctx.mappings == [{"id": "m1"}] and callable(ctx.run_agent)
     assert rows(pg)[0] == ("schema:a", "done", 1, {"mapping_id": "m", "others": [{"n": 2}]}, None)
+
+
+@pytest.mark.parametrize("exc, down", [
+    (psycopg.OperationalError("server closed the connection unexpectedly"), True),
+    (psycopg.InterfaceError("the connection is closed"), True),
+    (psycopg.errors.AdminShutdown("terminating connection"), True),
+    (psycopg.errors.ProgramLimitExceeded("index row size exceeds"), False),
+    (psycopg.errors.DeadlockDetected("deadlock detected"), False),
+    (psycopg.errors.QueryCanceled("canceling statement"), False)])
+def test_only_a_lost_database_means_reconnect(exc, down):
+    assert main._db_down(exc) is down

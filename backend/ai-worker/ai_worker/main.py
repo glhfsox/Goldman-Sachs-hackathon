@@ -45,6 +45,13 @@ PENDING_S, FINISHED_S = 2.0, 30.0  # how often the api's runs are polled
 PENDING_DOWN_S, RUNS_DOWN_S = 5.0, 30.0  # the wait after a failed pending poll; after a 404 or a failed finished poll
 
 
+def _db_down(e: Exception) -> bool:
+    """Lost the database itself (no SQLSTATE, class 08 connection exception, 57P shutdown / terminated backend):
+    reconnect. Any other OperationalError (a limit, a deadlock, a cancelled query) is the job's own error."""
+    state = getattr(e, "sqlstate", None)
+    return isinstance(e, psycopg.InterfaceError) or not state or state.startswith(("08", "57P"))
+
+
 def _permanent(e: Exception) -> bool:
     """Retrying changes nothing: JobFailed (a refusal, a rejected submission, a Jev 4xx), an api 4xx, or an Anthropic
     4xx other than 408, 409 and 429. Everything else (5xx, 529, timeouts, connection errors, junk answers) retries."""
@@ -255,8 +262,13 @@ class Worker:
         try:
             try:
                 result = HANDLERS[job["kind"]](job["input"], ctx)
-            except DB_ERRORS:
-                raise
+            except DB_ERRORS as e:
+                if _db_down(e):
+                    raise
+                err = e  # a statement that fails the same way every time: count an attempt, don't reconnect forever
+                retry_in = jobs.backoff(job["kind"], job["attempts"] + 1)
+                log.exception("%s failed, retry in %.0f s", job["id"], retry_in)
+                status = jobs.finish(self.jobs_pg, job, error=repr(e), retry_in=retry_in)
             except Exception as e:
                 err = e
                 if _permanent(e):

@@ -7,6 +7,7 @@ A retried job waits until `run_after`: exponential backoff with jitter per job, 
 
 import random
 
+from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -47,6 +48,8 @@ def finish(conn, job: dict, result: dict | None = None, error: str | None = None
     """Record the outcome of a claimed job and commit: done with `result`; or failed with `error`, unless `retry_in`
     is given and attempts are left, then back to pending for `retry_in` seconds. A done or failed job's checkpoints
     are deleted in the same transaction; a pending one keeps them, so the retry resumes. Returns the new status."""
+    if conn.info.transaction_status == TransactionStatus.INERROR:
+        conn.rollback()  # the job's own statement failed on this connection; the row is still pending
     attempts = job["attempts"] + 1
     status = "done" if error is None else "pending" if retry_in is not None and attempts < MAX_ATTEMPTS else "failed"
     conn.execute("UPDATE jobs SET status = %s, attempts = %s, result = %s, error = %s,"
