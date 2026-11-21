@@ -10,6 +10,12 @@ public interface IRunRepository
 
     Task<bool> HasLiveRunAsync(string alertId, CancellationToken cancellationToken = default);
 
+    // The alert's scheduled or running run, tracked; null when it has none.
+    Task<RunbookRun?> GetLiveByAlertIdAsync(string alertId, CancellationToken cancellationToken = default);
+
+    // Starts the oldest scheduled run whose start time has passed; replicas never get the same run.
+    Task<RunbookRun?> ClaimDueScheduledAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<ActionRun>> GetNodesAsync(string runId, CancellationToken cancellationToken = default);
 
     // Read without tracking: the run is loaded again, under its lock, when a step completes.

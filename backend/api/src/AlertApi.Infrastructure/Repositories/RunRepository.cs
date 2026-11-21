@@ -34,6 +34,18 @@ public sealed class RunRepository : IRunRepository
         RETURNING *
         """;
 
+    private const string ClaimDueScheduledSql = """
+        UPDATE runbook_runs
+        SET status = 'running', started_at = {0}
+        WHERE id = (
+            SELECT id FROM runbook_runs
+            WHERE status = 'scheduled' AND start_at <= {0}
+            ORDER BY start_at
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED)
+        RETURNING *
+        """;
+
     private const string LockRunSql = "SELECT id FROM runbook_runs WHERE id = {0} FOR UPDATE";
 
     private readonly ApiDbContext _context;
@@ -63,6 +75,22 @@ public sealed class RunRepository : IRunRepository
         return await _context.Runs.AnyAsync(
             run => run.AlertId == alertId && (run.Status == RunbookRun.Scheduled || run.Status == RunbookRun.Running),
             cancellationToken);
+    }
+
+    public async Task<RunbookRun?> GetLiveByAlertIdAsync(string alertId, CancellationToken cancellationToken = default)
+    {
+        return await _context.Runs.FirstOrDefaultAsync(
+            run => run.AlertId == alertId && (run.Status == RunbookRun.Scheduled || run.Status == RunbookRun.Running),
+            cancellationToken);
+    }
+
+    public async Task<RunbookRun?> ClaimDueScheduledAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var claimed = await _context.Runs
+            .FromSqlRaw(ClaimDueScheduledSql, now)
+            .ToListAsync(cancellationToken);
+
+        return claimed.FirstOrDefault();
     }
 
     public async Task<IReadOnlyList<ActionRun>> GetNodesAsync(string runId, CancellationToken cancellationToken = default)

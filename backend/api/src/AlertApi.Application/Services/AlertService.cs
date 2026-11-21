@@ -19,6 +19,7 @@ public sealed class AlertService : IAlertService
     private readonly IAlertChangeOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
+    private readonly IRunAutomation _automation;
 
     public AlertService(
         IAlertRepository alerts,
@@ -28,8 +29,10 @@ public sealed class AlertService : IAlertService
         IReferenceDataQueries queries,
         IAlertChangeOutbox outbox,
         IUnitOfWork unitOfWork,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IRunAutomation automation)
     {
+        _automation = automation;
         _queries = queries;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
@@ -93,6 +96,9 @@ public sealed class AlertService : IAlertService
         {
             throw new AlertStateConflictException(id, alert.Status, "resolved");
         }
+
+        // Same save as the outbox row: nothing starts on an alert a person has just resolved.
+        await _automation.StageCancelAsync(id, user, cancellationToken);
 
         return await PublishAsync(alert.ToSnapshot() with { Status = Alert.Resolved, ResolvedBy = user }, "resolved", user, cancellationToken);
     }
