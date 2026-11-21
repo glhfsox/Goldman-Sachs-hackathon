@@ -68,7 +68,10 @@ The record key is `event_id`, so the records of one source (even a single busy o
 - Severity scale, low to high: `info`, `warning`, `error`, `critical`.
 - An event with no matching mapping still gets an envelope: `mapped: false`, `type: "unmapped"`,
   `severity: "warning"`, `env: "unknown"`, `service` = `source`, `ts` = `received_at`, `dedup_hints: []`.
-  Rules can still match it through `raw.*`, and the UI shows it as unmapped.
+  Rules can still match it through `raw.*`, and the UI shows it as unmapped. The processor also parks
+  the event (up to 1,000 per schema, for 1 hour) and, when a mapping that fits becomes active, runs it
+  again as a mapped event through every rule that did not already match it. A replayed event keeps its
+  original `received_at`.
 - The envelope is not a Kafka record. It is stored on the alert as `sample_event` and is what rule
   conditions, templates and runbook placeholders read (path rules in [rules.md](rules.md)).
 - Rules and templates always see the whole payload. The copy stored on the alert is capped so that no
@@ -108,7 +111,8 @@ same transaction ([storage.md](storage.md)), then Kafka, then Redis `ui.alerts`.
 Consumers: the notifier (policy and delivery; on `acked` it cancels every notification of that alert
 that is still pending), the api (its read copy of alerts and the timeline) and the processor, which owns
 alert state and applies the `acked` and `resolved` records the api published. Every consumer ignores
-changes it published itself and applies the rest idempotently by `change_id`.
+changes it published itself and applies the rest idempotently by `change_id`. The ai-worker reads only
+`resolved` records, to draft a runbook from what people did on that alert ([runbooks.md](runbooks.md)).
 
 ### What the notifier gets from the processor
 
@@ -172,14 +176,14 @@ the row they hold.
 | `kind` | `id` | `body` | Copied by |
 |---|---|---|---|
 | `source` | source id | `{id, kind, config, enabled}` | ingest |
-| `mapping` | mapping id | Mapping ([rules.md](rules.md) §3) | processor |
+| `mapping` | mapping id | Mapping ([rules.md](rules.md) §3) | processor; ai-worker (in memory, to check a new mapping against the existing ones) |
 | `rule` | rule id | Rule ([rules.md](rules.md) §4) | processor, notifier |
 | `service_dep` | `<service>:<depends_on>` | `{service, depends_on}` | processor |
 | `team` | team id | `{id, name}` | notifier |
 | `user` | user id | `{id, name, email, phone}` | notifier |
 | `membership` | `<team_id>:<user_id>` | `{team_id, user_id, on_call}` | notifier |
 | `preferences` | user id | Preferences ([rules.md](rules.md) §5) | notifier |
-| `runbook` | runbook id | `{id, team_id, title, format, source, canonical, status, version}` | notifier (`active`), ai-worker (`draft`, to convert) |
+| `runbook` | runbook id | `{id, team_id, title, format, source, canonical, status, version}` | notifier (`active`), ai-worker (`draft` with no `canonical`, to convert) |
 
 `deleted: true` (with `body: null`) is used only for rows that really disappear (`membership`,
 `service_dep`); everything else is disabled through its `enabled` or `status` field.
@@ -207,7 +211,8 @@ not repeated here: the api derives those timeline rows from `alerts.changes`.
 
 ## 8. New schemas: topic `schema.samples`
 
-Published by the processor once per fingerprint, when an event matches no mapping.
+Published by the processor once per fingerprint, when an event matches no mapping. The events of
+that schema wait in the processor until a mapping arrives (§3).
 
 ```json
 {

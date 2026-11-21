@@ -1,0 +1,26 @@
+{
+  "change_id": "__CHANGE_ID__",
+  "change": "opened",
+  "at": "__NOW__",
+  "actor": "processor",
+  "alert": {
+    "id": "alert-payments-1",
+    "rule_id": "anna-payments-critical",
+    "team_id": "payments",
+    "incident_id": null,
+    "status": "open",
+    "severity": "critical",
+    "title": "HighErrorRate on payments-api",
+    "body": "Error rate 12% over the last 5 minutes",
+    "fields": {
+      "region": "eu-west"
+    },
+    "color": "red",
+    "count": 1,
+    "last_seen": "__NOW__",
+    "sample_event": {
+      "event_id": "evt-payments-1",
+      "service": "payments-api"
+    }
+  }
+}

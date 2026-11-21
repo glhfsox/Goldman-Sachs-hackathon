@@ -37,13 +37,15 @@ A node is a group `{"all": [node, ...]}`, a group `{"any": [node, ...]}`, or a l
 ## 3. Schema mapping (table `mappings`)
 
 Turns a raw payload into the envelope. Mappings are tried by `priority`, highest first; the first
-whose `match` is true wins. `match` sees only `source` and `raw.*`.
+whose `match` is true wins. `match` sees only `source` and `raw.*`. A mapping written by the AI worker gets
+priority 10, below seeded and human ones, so it can never take events from an existing mapping; the
+example below is a seeded one.
 
 ```json
 {
   "id": "trade-rejected-v1",
   "status": "active",
-  "origin": "llm",
+  "origin": "seed",
   "priority": 100,
   "match": {"all": [{"field": "raw.meta.schema", "op": "glob", "value": "trade.rejected*"}]},
   "fields": {
@@ -67,8 +69,9 @@ whose `match` is true wins. `match` sees only `source` and `raw.*`.
 - Onboarding a new schema: the processor publishes one sample per unknown shape to Kafka `schema.samples`
   ([events.md](events.md) §8); the AI worker asks Claude for a mapping object and saves it through the API as `active` if every `path` resolves on
   the sample, the severity is on the scale and `ts` parses. Otherwise the sample is marked `failed` and
-  a person writes the mapping in the UI. Only events that arrive after the mapping is active use it;
-  earlier ones stay unmapped.
+  a person writes the mapping in the UI. Events of that schema that arrived earlier are not lost: the
+  processor parks them (up to 1,000 per schema, for 1 hour) and runs them through the mapping and the
+  rules as soon as a mapping for them becomes active.
 
 ## 4. Rule (table `rules`)
 

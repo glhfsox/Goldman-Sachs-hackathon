@@ -1,8 +1,9 @@
 # API for the UI: REST and WebSocket
 
 Base URL `http://localhost:8000/api`. JSON in and out. No auth in the PoC: every request carries
-`X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log.
-Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status.
+`X-User: <user id>` from the UI's user picker; it becomes the `actor` in the audit log. A service
+calling the api sends its own name there: the ai-worker sends `X-User: ai-worker`.
+Errors: `{"error": "<code>", "message": "...", "details": [...]}` with a 4xx status; the api sends them as `application/problem+json`, so `title`, `status` and `detail` are there too. Codes: `not_found` (404), `conflict` (409), `invalid_<thing>` (422).
 
 ## Alert object
 
@@ -43,13 +44,16 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `POST /alerts/{id}/ack` | | `Alert` |
 | `POST /alerts/{id}/resolve` | | `Alert` |
 | `GET /rules?team=` | | `[Rule]` ([rules.md](rules.md)) |
-| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule` |
-| `GET /mappings`, `PUT /mappings/{id}` | `Mapping` | `Mapping`, or `422 invalid_mapping` |
+| `GET /rules/{id}` | | `Rule` |
+| `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule`. `409 conflict` for a taken id on `POST`; on `PUT` the body `id` must equal the URL id |
+| `GET /mappings`, `PUT /mappings/{id}[?fingerprint=<fingerprint>]` | `Mapping` | `Mapping`, or `422 invalid_mapping`. `PUT` creates or replaces; `GET` lists highest `priority` first. With `fingerprint`, that schema sample becomes `mapped` |
 | `GET /schema-samples?status=` | | unmapped schemas waiting for a mapping |
-| `GET /sources`, `POST /sources` | `{id, kind, config}` | `Source` |
+| `PUT /schema-samples/{fingerprint}` | `{status: "failed", error}` | the sample; the ai-worker calls it when it could not produce a valid mapping, so a person writes one in the UI |
+| `GET /sources`, `GET /sources/{id}`, `POST /sources` | `{id, kind, config}` | `Source`. `id`: lowercase letters, digits, `-`; a `kafka` source needs `config.topic`; `422 invalid_source` otherwise, `409 conflict` for a taken id |
+| `PUT /sources/{id}` | `{kind, config, enabled}` | `Source` (also how a source is disabled) |
 | `GET /teams`, `GET /users` | | lists for pickers; a team includes `members` and who is on call |
 | `GET /users/{id}/preferences`, `PUT /users/{id}/preferences` | `Preferences` | `Preferences` |
-| `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` until converted and activated) |
+| `GET /runbooks?team=`, `POST /runbooks` | `{team_id, title, format, source}` | `Runbook` (status `draft` until the ai-worker has converted it, [runbooks.md](runbooks.md)) |
 | `PUT /runbooks/{id}` | `{canonical?, status?}` | `Runbook` |
 | `POST /alerts/{id}/actions` | `{runbook_id, step_index}` | `ActionRun`: `running`, or `waiting_approval` when the step needs approval |
 | `POST /actions/{id}/approve`, `POST /actions/{id}/reject` | | `ActionRun` |
@@ -62,6 +66,24 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 
 Each item of `notifications` carries what the UI needs for "why you got this / why not":
 `{id, user_id, channel, status, reason, send_at, sent_at, error}`.
+
+Each item of `timeline` is an `alert_events` row `{id, alert_id, at, actor, kind, data}`
+([schemas/api.md](schemas/api.md)). For the `action_*` kinds, `data` is
+`{"action_run": {id, runbook_id, step_index, action, params, status, result}}`.
+
+A proposal of kind `runbook` has the body `{team_id, title, canonical}`, where `canonical` is a
+canonical runbook ([runbooks.md](runbooks.md)). The ai-worker files one when an alert is resolved after
+people ran actions on it; accepting it saves that runbook as `active`. Example:
+
+```json
+{"kind": "runbook", "body": {"team_id": "settlements", "title": "WORKFLOW_FAILED in prod",
+ "canonical": {"id": "workflow-failed-prod", "title": "WORKFLOW_FAILED in prod",
+  "matches": {"all": [{"field": "type", "op": "eq", "value": "WORKFLOW_FAILED"}, {"field": "env", "op": "eq", "value": "prod"}]},
+  "steps": [{"text": "Check counterparty-service health", "action": "http_get",
+             "params": {"url": "http://counterparty-service/health"}, "approval": "none"}]}}}
+```
+
+The api accepts exactly what the processor reads: unknown fields, wrong types and unknown ops are `422`, and `details` has one entry per wrong path.
 
 Example invalid rule:
 

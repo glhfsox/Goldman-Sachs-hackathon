@@ -31,13 +31,24 @@ Reset alert state between runs (keeps the seeded config):
 
 ```bash
 docker compose stop processor
-docker compose exec -T processor-db psql -U alerts -d processor -c "TRUNCATE alerts, outbox, outbox_dead, schema_samples"
+docker compose exec -T processor-db psql -U alerts -d processor -c "TRUNCATE alerts, outbox, outbox_dead, schema_samples, parked_events"
 docker compose exec -T redis redis-cli FLUSHALL
 docker compose up -d processor
 ```
 
 Ports on the host: Kafka `localhost:9092`, Postgres `localhost:5434` (user/password `alerts`, db
 `processor`), Redis `localhost:6379`.
+
+## Unmapped events wait for their mapping
+
+An event no mapping fits still runs through the rules as `unmapped`, and is also parked in `parked_events`
+(up to 1,000 per schema, for 1 hour). When a replica's compiled config changes, and once at its start, it
+re-runs the parked events through the current mappings, one replica at a time; those that map now are
+counted like fresh events (the rules they already matched as unmapped are skipped) and deleted, the rest stay.
+Known limits: a crash between counting a replayed page and deleting it, or an `events.raw` batch redelivered
+before or after its parked rows were replayed, can over-count by at most one batch (the alert and its `opened` record
+are never duplicated); replayed events keep their original `received_at`; past 1,000 events of one schema
+the rest are not parked, so the alert's count starts from those 1,000.
 
 ## What is mocked or missing
 

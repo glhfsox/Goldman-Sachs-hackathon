@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AlertApi.Api/AlertApi.Api.csproj" />
+    <Project Path="src/AlertApi.Application/AlertApi.Application.csproj" />
+    <Project Path="src/AlertApi.Domain/AlertApi.Domain.csproj" />
+    <Project Path="src/AlertApi.Infrastructure/AlertApi.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AlertApi.Tests/AlertApi.Tests.csproj" />
+  </Folder>
+</Solution>

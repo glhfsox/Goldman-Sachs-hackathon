@@ -161,7 +161,7 @@ def db(pg_url):
 @pytest.fixture
 def sql(db):
     with psycopg.connect(db, autocommit=True, row_factory=dict_row) as c:
-        c.execute("TRUNCATE alerts, outbox, outbox_dead, schema_samples RESTART IDENTITY")
+        c.execute("TRUNCATE alerts, outbox, outbox_dead, schema_samples, parked_events RESTART IDENTITY")
         yield lambda q, *a: c.execute(q, a).fetchall()
 
 

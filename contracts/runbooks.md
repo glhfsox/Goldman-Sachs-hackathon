@@ -29,11 +29,21 @@ converted once to this form in `runbooks.canonical`. Only `active` runbooks are 
   unless the action is registered as `read_only`.
 - `when` is shown to the person as a condition; it is not evaluated.
 - `matches` uses the condition language and paths of [rules.md](rules.md). Placeholders are `{{path}}`.
+  `matches` may be left out when the source does not say what the runbook applies to; such a runbook
+  is shown only on alerts of a rule that names it in `runbook_id`.
 - A `link` runbook is stored as one step `{"text": "Open the runbook", "link": "<url>"}`. The URL is never fetched.
 
-Conversion: a YAML source in the shape of the brief's Appendix B is parsed by code. Markdown and free
-text are converted by the AI worker through the Claude API into this JSON; the result is saved as
-`draft` and a person reviews and activates it. A step that failed is never retried or replaced by an LLM.
+Conversion: the canonical form is internal. A person writes and keeps seeing the runbook in their own
+format (`source`); the AI worker converts every format except `link` (YAML, Markdown, free text, anything
+else) into this JSON through the Claude API, and code checks the result before it is saved: actions are
+limited to the registered names, `matches` must be a valid condition, and a step whose action is not
+`read_only` gets `approval: required` unless the source says in so many words that it needs none. A
+runbook that passes is saved as `active` at once (`PUT /runbooks/{id}`, [api.md](api.md)); one that does
+not stays `draft`. A step that failed is never retried or replaced by an LLM.
+
+Learning from incidents: when an alert is resolved after people ran actions on it, the AI worker reads
+that alert's timeline and files a proposal of kind `runbook` ([api.md](api.md)) whose `matches` is the
+alert's `type` and `env` and whose steps are the actions that were run. The team accepts or rejects it.
 
 Which runbook an alert gets: the rule's `runbook_id`; otherwise the first active runbook of the team
 whose `matches` is true for the alert's `sample_event`; otherwise none. An incident shows the runbooks of
