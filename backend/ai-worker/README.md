@@ -94,13 +94,20 @@ risk check, failed; median seconds from the alert to the approval; how many of t
 window). No user ids.
 
 `scripts/runs_demo.py` schedules three `auto` runs in the stub api (a staging retry, a 25,000,000 EUR prod settlement
-retry, and one whose window is already over), prints each verdict, then adds 10 finished runs and prints the
-`runbook_start` proposal.
+retry, and one whose window is already over), prints each verdict, then opens 10 alerts on `alerts.changes`, adds a finished run for each
+and prints the `runbook_start` proposal.
 
 `evals/run_risk_golden.jsonl` holds 30 labelled runs (15 `clear`, 15 `hold`) for the risk check;
 `scripts/eval_run_risk.py` sends each through the job's own code to the real Jev and counts the misses. Measured
 on 21-11: 25 of 30 right, no run cleared that should have been held, 5 held that could have started, the same
 verdicts on three repeats. Run it before and after any change of the question wording or of `CLEAR_MIN`.
+
+`evals/run_start_golden.jsonl` holds 16 labelled run histories for the start-mode judge (which proposal the job
+should file: `auto`, `approval` or none); `scripts/eval_run_start.py` runs them the same way. Measured on 21-11:
+15 of 16 right and no `auto` proposed where it should not be, the same on three repeats; the question says in so
+many words that money, payments, settlements, payouts and trades in production stay on approval whatever the
+history. Known miss: a routine restart in production with a perfect history gets no `auto` proposal. The histories
+were written by the same hand that tuned the wording, so expect less on new cases.
 
 ## What is mocked
 
