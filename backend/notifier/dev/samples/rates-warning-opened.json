@@ -1,0 +1,26 @@
+{
+  "change_id": "__CHANGE_ID__",
+  "change": "opened",
+  "at": "__NOW__",
+  "actor": "processor",
+  "alert": {
+    "id": "alert-rates-1",
+    "rule_id": "rates-large-rejections",
+    "team_id": "rates",
+    "incident_id": null,
+    "status": "open",
+    "severity": "warning",
+    "title": "Trade T-1 rejected: LIMIT_BREACH (25000000 EUR)",
+    "body": "Desk rates, notional 25000000 EUR",
+    "fields": {
+      "payload.desk": "rates",
+      "payload.reason": "LIMIT_BREACH"
+    },
+    "color": "orange",
+    "count": 1,
+    "last_seen": "__NOW__",
+    "sample_event": {
+      "event_id": "evt-rates-1"
+    }
+  }
+}
