@@ -5,7 +5,7 @@ namespace AlertApi.Application.Interfaces;
 
 public interface IProposalService
 {
-    Task<CreatedProposal> CreateAsync(string alertId, CreateProposalRequest request, string? userId, CancellationToken cancellationToken = default);
+    Task<CreatedProposal> CreateAsync(string alertId, CreateProposalRequest request, string? userId, string? idempotencyKey, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ProposalResponse>> GetAllAsync(string? status, int limit, CancellationToken cancellationToken = default);
 

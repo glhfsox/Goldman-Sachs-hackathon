@@ -56,11 +56,19 @@ public sealed class ProposalService : IProposalService
         string alertId,
         CreateProposalRequest request,
         string? userId,
+        string? idempotencyKey,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var author = await RequireAuthorAsync(userId, cancellationToken);
+        var key = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
+
+        // A retry with the same key gets the first proposal whatever its body: a Jev judge may answer a little differently the second time.
+        if (key is not null && await _proposals.GetByIdempotencyKeyAsync(key, cancellationToken) is { } keyed)
+        {
+            return new CreatedProposal(ProposalResponse.From(keyed), Created: false);
+        }
 
         if (await _alerts.GetByIdAsync(alertId, cancellationToken) is null)
         {
@@ -86,7 +94,7 @@ public sealed class ProposalService : IProposalService
         }
 
         var now = _timeProvider.GetUtcNow();
-        var proposal = Proposal.Create(Guid.NewGuid().ToString(), alertId, request.Kind!, body, author, now);
+        var proposal = Proposal.Create(Guid.NewGuid().ToString(), alertId, request.Kind!, body, author, now, key);
 
         await _proposals.AddAsync(proposal, cancellationToken);
         await AddTimelineRowAsync("proposal-created", proposal, "proposal_created", author, now, cancellationToken);

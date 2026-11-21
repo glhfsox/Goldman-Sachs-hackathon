@@ -20,6 +20,8 @@ public sealed class ProposalConfiguration : IEntityTypeConfiguration<Proposal>
         builder.Property(proposal => proposal.DecidedBy).HasColumnName("decided_by");
         builder.Property(proposal => proposal.CreatedAt).HasColumnName("created_at");
         builder.Property(proposal => proposal.DecidedAt).HasColumnName("decided_at");
+        builder.Property(proposal => proposal.IdempotencyKey).HasColumnName("idempotency_key");
+        builder.HasIndex(proposal => proposal.IdempotencyKey).IsUnique().HasDatabaseName("UQ_proposals_idempotency_key");
         builder.HasIndex(proposal => new { proposal.Status, proposal.CreatedAt }).HasDatabaseName("IX_proposals_status_created_at");
         builder.HasIndex(proposal => new { proposal.AlertId, proposal.Kind }).HasDatabaseName("IX_proposals_alert_id_kind");
     }

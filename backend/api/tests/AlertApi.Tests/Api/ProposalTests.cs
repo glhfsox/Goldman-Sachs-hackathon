@@ -93,6 +93,27 @@ public sealed class ProposalTests : IClassFixture<PostgresFixture>
     }
 
     [Fact]
+    public async Task Create_WithTheSameIdempotencyKey_ReturnsTheFirstWith200_WhateverTheBody()
+    {
+        using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
+        using var client = factory.CreateClient();
+        await Apply(factory, ActivityRecords.AlertChange("c-1", "opened"));
+
+        var first = await Send(client, "/api/alerts/alert-1/proposals", "ai-worker", RuleSeverity, "severity:r1:first");
+        var second = await Send(client, "/api/alerts/alert-1/proposals", "ai-worker", RuleSeverity.Replace("0.82", "0.79"), "severity:r1:first");
+        var other = await Send(client, "/api/alerts/alert-1/proposals", "ai-worker", RuleSeverity.Replace("0.82", "0.7"), "severity:r1:20");
+        var all = await client.GetFromJsonAsync<JsonElement>("/api/proposals");
+
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, other.StatusCode);
+        Assert.Equal(
+            (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString(),
+            (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString());
+        Assert.Equal(2, all.GetArrayLength());
+    }
+
+    [Fact]
     public async Task Create_WithABadRequest_IsRefusedWithThePath()
     {
         using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
@@ -235,13 +256,18 @@ public sealed class ProposalTests : IClassFixture<PostgresFixture>
         return body.GetProperty("details")[0].GetProperty("path").GetString();
     }
 
-    private static async Task<HttpResponseMessage> Send(HttpClient client, string path, string? user, string? json)
+    private static async Task<HttpResponseMessage> Send(HttpClient client, string path, string? user, string? json, string? idempotencyKey = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, path);
 
         if (user is not null)
         {
             request.Headers.Add("X-User", user);
+        }
+
+        if (idempotencyKey is not null)
+        {
+            request.Headers.Add("Idempotency-Key", idempotencyKey);
         }
 
         if (json is not null)
