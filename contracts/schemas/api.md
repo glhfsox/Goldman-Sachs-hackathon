@@ -67,18 +67,48 @@ Owned by the api and read only by it, so it is not published on `config.changes`
 
 `runbooks.version` is a concurrency token too: a save that read an older version fails with `409`.
 
-### `action_runs`
+### `runbook_runs`
+
+One run of a runbook on an alert (migration `AddRunbookRuns`). Indexed on `(status, finished_at)` and `(alert_id, created_at)`.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | text, primary key | |
-| `alert_id`, `runbook_id` | text, not null | |
-| `step_index` | int, not null | |
-| `action` | text, not null | Action plugin name |
-| `params` | jsonb, not null | Placeholders already filled |
-| `status` | text, not null | `waiting_approval`, `running`, `succeeded`, `failed`, `rejected` |
-| `requested_by`, `approved_by` | text | User ids |
-| `result` | jsonb | |
+| `id` | text, primary key | `run-` and 12 hex characters |
+| `alert_id`, `rule_id`, `team_id`, `runbook_id` | text, not null | `rule_id` and `team_id` are copied from the alert |
+| `runbook_version` | int, not null | The accepted version that was run |
+| `risk` | text, not null | `read_only`, `auto` or `approval`: the highest risk of any step, including steps an `if` may skip |
+| `trigger` | text, not null | `manual` (automatic start comes with step 4) |
+| `status` | text, not null | `scheduled`, `running`, `done`, `failed`, `cancelled`. Unique index `UQ_runbook_runs_live_alert` on `alert_id` where status is `scheduled` or `running`: one live run per alert |
+| `start_at` | timestamptz, not null | When the run starts; now for a manual run |
+| `approved_by`, `approved_at` | text, timestamptz | The person who started it by hand |
+| `created_at` | timestamptz, not null | |
+| `started_at`, `finished_at` | timestamptz | |
+| `cancelled_by` | text | |
+
+### `action_runs`
+
+One row per step (node) of a run. The ai-worker reads the finished ones through `GET /runs`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | text, primary key | `<run_id>:<node_id>` |
+| `run_id`, `alert_id`, `runbook_id` | text, not null | Unique `(run_id, node_id)` |
+| `node_id` | text, not null | The step's `id`, or `step-<index>` |
+| `step_index` | int, not null | Order in the runbook, for the UI |
+| `text` | text, not null | The step's text with its placeholders filled |
+| `action` | text | Action plugin name; null for a text-only step, which a person ticks |
+| `params` | jsonb | Placeholders already filled, once, at run creation |
+| `risk` | text, not null | The step's risk (`read_only` for a text step) |
+| `target_id`, `target_version` | text, int | The action target the request was resolved against |
+| `request` | jsonb | `{method, url, body}` frozen at run creation; null for a text step or a blocked step |
+| `needs` | jsonb, not null | Ids of the steps it waits for (a text step that was only waited for by default is looked through) |
+| `if_step`, `if_status` | text | The step's `if` |
+| `retries`, `timeout_s` | int | |
+| `status` | text, not null | `pending`, `ready`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `cancelled` |
+| `attempt` | int, not null | Calls made so far; a step may run again while `attempt < 1 + retries` |
+| `not_before`, `lease_until` | timestamptz | When a ready step may be claimed; when a running claim expires (executor, step 3c) |
+| `idempotency_key` | text, not null, unique | `<run_id>:<node_id>`; sent with every call |
+| `result` | jsonb | Cut to 4 KB |
 | `started_at`, `finished_at` | timestamptz | |
 
 ### `proposals`

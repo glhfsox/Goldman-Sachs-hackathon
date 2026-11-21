@@ -68,6 +68,8 @@ builder.Services.AddSingleton<IActionPlugin, WebhookAction>();
 builder.Services.AddSingleton<IActionPlugin, TicketAction>();
 builder.Services.AddSingleton<IActionPlugin, EscalateAction>();
 builder.Services.AddSingleton<IActionRegistry, ActionRegistry>();
+builder.Services.AddScoped<IRunRepository, RunRepository>();
+builder.Services.AddScoped<IRunService, RunService>();
 builder.Services.AddScoped<IProposalRepository, ProposalRepository>();
 builder.Services.AddScoped<IProposalService, ProposalService>();
 builder.Services.AddSingleton(new RedisOptions { Url = redisUrl });
@@ -130,6 +132,7 @@ app.MapAlertEndpoints();
 app.MapSchemaSampleEndpoints();
 app.MapRunbookEndpoints();
 app.MapActionEndpoints();
+app.MapRunEndpoints();
 app.MapProposalEndpoints();
 app.MapLiveEndpoints();
 

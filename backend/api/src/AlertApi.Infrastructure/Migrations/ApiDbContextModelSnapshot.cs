@@ -22,6 +22,142 @@ namespace AlertApi.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("AlertApi.Domain.Models.ActionRun", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .HasColumnType("text")
+                        .HasColumnName("action");
+
+                    b.Property<string>("AlertId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("alert_id");
+
+                    b.Property<int>("Attempt")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<string>("IfStatus")
+                        .HasColumnType("text")
+                        .HasColumnName("if_status");
+
+                    b.Property<string>("IfStep")
+                        .HasColumnType("text")
+                        .HasColumnName("if_step");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<string>("Needs")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("needs");
+
+                    b.Property<string>("NodeId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("node_id");
+
+                    b.Property<DateTimeOffset?>("NotBefore")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("not_before");
+
+                    b.Property<string>("Params")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("params");
+
+                    b.Property<string>("Request")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("request");
+
+                    b.Property<string>("Result")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("result");
+
+                    b.Property<int>("Retries")
+                        .HasColumnType("integer")
+                        .HasColumnName("retries");
+
+                    b.Property<string>("Risk")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("risk");
+
+                    b.Property<string>("RunId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("run_id");
+
+                    b.Property<string>("RunbookId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("runbook_id");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<int>("StepIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("step_index");
+
+                    b.Property<string>("TargetId")
+                        .HasColumnType("text")
+                        .HasColumnName("target_id");
+
+                    b.Property<int?>("TargetVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("target_version");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("text");
+
+                    b.Property<int?>("TimeoutSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("timeout_s");
+
+                    b.HasKey("Id")
+                        .HasName("PK_action_runs");
+
+                    b.HasIndex("AlertId")
+                        .HasDatabaseName("IX_action_runs_alert_id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_action_runs_idempotency_key");
+
+                    b.HasIndex("NotBefore")
+                        .HasDatabaseName("IX_action_runs_claimable")
+                        .HasFilter("status in ('ready', 'running')");
+
+                    b.HasIndex("RunId", "NodeId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_action_runs_run_id_node_id");
+
+                    b.ToTable("action_runs", (string)null);
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.ActionTarget", b =>
                 {
                     b.Property<string>("Id")
@@ -490,6 +626,96 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasDatabaseName("IX_runbooks_team_id");
 
                     b.ToTable("runbooks", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.RunbookRun", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AlertId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("alert_id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("approved_by");
+
+                    b.Property<string>("CancelledBy")
+                        .HasColumnType("text")
+                        .HasColumnName("cancelled_by");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<string>("Risk")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("risk");
+
+                    b.Property<string>("RuleId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("rule_id");
+
+                    b.Property<string>("RunbookId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("runbook_id");
+
+                    b.Property<int>("RunbookVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("runbook_version");
+
+                    b.Property<DateTimeOffset>("StartAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("start_at");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TeamId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("team_id");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("trigger");
+
+                    b.HasKey("Id")
+                        .HasName("PK_runbook_runs");
+
+                    b.HasIndex("AlertId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_runbook_runs_live_alert")
+                        .HasFilter("status in ('scheduled', 'running')");
+
+                    b.HasIndex("AlertId", "CreatedAt")
+                        .HasDatabaseName("IX_runbook_runs_alert_id_created_at");
+
+                    b.HasIndex("Status", "FinishedAt")
+                        .HasDatabaseName("IX_runbook_runs_status_finished_at");
+
+                    b.ToTable("runbook_runs", (string)null);
                 });
 
             modelBuilder.Entity("AlertApi.Domain.Models.SchemaSample", b =>

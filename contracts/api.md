@@ -59,8 +59,11 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `GET /runbooks/{id}` | | `Runbook` |
 | `PUT /runbooks/{id}` | `{canonical?, status?}` | `Runbook`. A new `canonical` bumps `version` and clears `accepted_by`; `canonical.id` must equal the URL id; `active` needs a canonical. `422 invalid_runbook` with one `details` entry per wrong path |
 | `POST /runbooks/{id}/accept?version=` | none, `X-User` of a person; `version` = the version the person reviewed (required, `422` without it) | `Runbook` with `accepted_by` and `accepted_at`. `403` for a service actor or an unknown user, `409` when the runbook is not `active` or `version` is not the current one |
-| `POST /alerts/{id}/actions` | `{runbook_id, step_index}` | `ActionRun`: `running`, or `waiting_approval` when the step needs approval |
-| `POST /actions/{id}/approve`, `POST /actions/{id}/reject` | | `ActionRun` |
+| `GET /alerts/{id}/runs/preview?runbook_id=` | | `{runbook_id, runbook_version, risk, nodes: [{id, text, action, risk, params, missing}]}`: what starting a run would do, with every `{{placeholder}}` filled. `missing` lists the placeholders the alert has no value for (that step starts `blocked`) |
+| `POST /alerts/{id}/runs` | `{runbook_id}`, `X-User` of a person | `RunbookRun`, `201`, `running` at once; the person's start is the approval, whatever the risk. `403` for a service actor, `404` unknown alert or runbook, `409` when the alert has a live run, is resolved, or the runbook is not `active`, not accepted (`accepted_by`) or another team's, `422 invalid_run` without `runbook_id` or `422 invalid_runbook` when a step does not resolve |
+| `GET /runs/{id}` | | `RunbookRun` with every node |
+| `POST /runs/{id}/cancel` | none, `X-User` of a person | `RunbookRun`, `cancelled`: every step not yet started is `cancelled`, a running one finishes. `409` unless the run is `scheduled` or `running` |
+| `POST /runs/{id}/nodes/{node}/done` | none, `X-User` of a person | The node, `succeeded`. Only for a text-only step that is still `pending` in a live run, otherwise `409` |
 | `POST /alerts/{id}/proposals` | `{kind, body}` with `X-User` (a person or `ai-worker`) | `Proposal`, `201`. An identical open proposal (same alert, kind and body) is returned with `200` instead of a second one. `422 invalid_proposal` (one `details` entry per wrong path, each starting with `body.` or `kind`), `404` for an unknown alert or an `X-User` that is neither a user nor `ai-worker` |
 | `GET /proposals?status=&limit=` | | `[Proposal]`, newest first; `status` is `open`, `accepted` or `rejected`; `limit` defaults to 50, at most 200 |
 | `GET /proposals/{id}` | | `Proposal`, `404` when unknown |
@@ -79,7 +82,7 @@ A `Runbook` is `{id, team_id, title, format, source, canonical, status, version,
 `canonical` is `null` on a draft.
 
 `incident` and `runbook` in `GET /alerts/{id}` are `null` until incidents and runbooks are built. `runbook`, once built, is the canonical runbook ([runbooks.md](runbooks.md)) with every
-`{{placeholder}}` already filled from the alert's `sample_event`, plus the latest `ActionRun` per step.
+`{{placeholder}}` already filled from the alert's `sample_event` (not built yet; step 6 of #82 adds the run to it).
 
 Each item of `notifications` carries what the UI needs for "why you got this / why not":
 `{id, user_id, channel, status, reason, send_at, sent_at, error}`.
@@ -123,7 +126,7 @@ Accepting it sets the rule's `severity` to `body.severity` (a `PUT /rules/{rule_
              "median 4 events per alert"]}}
 ```
 
-### Runbook runs: needed by the ai-worker, not served by the api yet (issue #75)
+### Runbook runs: `GET /runs?risk_check=`, `?finished_since=` and the risk-check endpoints are not served yet (issue #75)
 
 On top of the run model of issue #73 (run risk `read_only` / `auto` / `approval`; an `auto` run is created
 `scheduled` with `start_at` = now + cancel window). `backend/ai-worker/scripts/stub_api.py` serves these as the
@@ -141,10 +144,10 @@ reference until the api does.
   ai-worker sends `clear` only when Jev chose it with confidence of at least 0.6.
 - No verdict by `start_at`: the api moves the run to `waiting_approval` (reason "risk check did not answer"); a run
   never starts unchecked. The ai-worker never starts or approves a run.
-- A `RunbookRun` here has `id`, `alert_id`, `rule_id`, `team_id`, `runbook_id`, `risk`, `trigger` (`auto` or
-  `manual`), `status`, `start_at`, `risk_check` (`{verdict, confidence, reasons}` or null) and
-  `nodes: [{id, action, risk, params, text}]` with params filled; a finished one also `approved_by`, `approved_at`,
-  `started_at`, `finished_at`, `cancelled_by` and each node's `status`.
+- A `RunbookRun` has `id`, `alert_id`, `rule_id`, `team_id`, `runbook_id`, `runbook_version`, `risk`, `trigger` (`auto` or
+  `manual`), `status`, `start_at`, `approved_by`, `approved_at`, `started_at`, `finished_at`, `cancelled_by` and
+  `nodes: [{id, step_index, text, action, risk, params, needs, status, attempt, result, started_at, finished_at}]` with
+  params filled. `risk_check` (`{verdict, confidence, reasons}` or null) comes with step 5.
 
 ```json
 POST /api/runs/run-7f3a/risk-check

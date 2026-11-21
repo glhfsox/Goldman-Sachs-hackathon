@@ -72,13 +72,16 @@ all its alerts, root cause first.
 Per channel: UI and email show all steps; SMS is the title plus the short link, 160 characters at most;
 a call is the title and first step as text-to-speech.
 
-## 2. Running an action
+## 2. Running a runbook
 
-1. The UI posts `POST /alerts/{id}/actions` ([api.md](api.md)).
-2. `approval: required` → the run waits in `waiting_approval` until someone approves or rejects it.
-   Being replaced (#82): the api ignores a step's `approval`; the action's risk decides, and runs replace this section.
-3. The API runs the plugin, stores the result in `action_runs`, appends to `alert_events`.
-4. On failure the run is `failed` and the alert stays open for a person. Nothing runs without a click.
+1. A person previews (`GET /alerts/{id}/runs/preview`) and starts a run (`POST /alerts/{id}/runs`, [api.md](api.md)). Only an
+   `active` version a person accepted runs, on an open alert of the runbook's team, one live run per alert.
+2. Every step's `{{placeholders}}` are filled once from the alert and its request is frozen (§3, action targets). A step the
+   alert has no value for is `blocked`. The run's risk is the highest risk of any step; a person starting it by hand is the approval.
+3. The planner moves the steps: a step is `ready` when everything it needs has ended, `skipped` when its `if` is false or
+   a step it needs was skipped, `blocked` when a step it needs failed. A text-only step waits for a person's tick.
+4. The executor (step 3c of #82) runs ready steps and records each result. A failed run leaves the alert open for a
+   person; nothing in the loop waits for a click. A run can be cancelled at any time.
 
 ## 3. Extension points: one file plus one config entry each
 
