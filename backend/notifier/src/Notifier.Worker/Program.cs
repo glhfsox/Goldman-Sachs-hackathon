@@ -36,13 +36,20 @@ if (string.IsNullOrWhiteSpace(builder.Configuration["Kafka:Brokers"]))
 
 builder.Services.AddOptions<KafkaOptions>().Bind(builder.Configuration.GetSection(KafkaOptions.SectionName)).ValidateOnStart();
 builder.Services.AddOptions<DeliveryOptions>().Bind(builder.Configuration.GetSection(DeliveryOptions.SectionName))
-    .Validate(options => options.BatchSize > 0 && options.MaxAttempts > 0, "Delivery:BatchSize and Delivery:MaxAttempts must be positive.")
+    .Validate(options => options.BatchSize > 0 && options.MaxAttempts > 0 && options.MaxParallelism > 0,
+        "Delivery:BatchSize, Delivery:MaxAttempts and Delivery:MaxParallelism must be positive.")
     .ValidateOnStart();
 builder.Services.AddOptions<EscalationOptions>().Bind(builder.Configuration.GetSection(EscalationOptions.SectionName))
     .Validate(options => options.PushDelayMinutes >= 0 && options.OnCallCallDelayMinutes >= 0, "Escalation delays cannot be negative.")
     .ValidateOnStart();
 builder.Services.AddOptions<OutboxOptions>().Bind(builder.Configuration.GetSection(OutboxOptions.SectionName))
     .Validate(options => options.BatchSize > 0 && options.MaxAttempts > 0, "Outbox:BatchSize and Outbox:MaxAttempts must be positive.")
+    .ValidateOnStart();
+builder.Services.AddOptions<ConfigCacheOptions>().Bind(builder.Configuration.GetSection(ConfigCacheOptions.SectionName))
+    .Validate(options => options.CacheSeconds >= 0, "ConfigCache:CacheSeconds cannot be negative.")
+    .ValidateOnStart();
+builder.Services.AddOptions<CleanupOptions>().Bind(builder.Configuration.GetSection(CleanupOptions.SectionName))
+    .Validate(options => options.IntervalMinutes > 0, "Cleanup:IntervalMinutes must be positive.")
     .ValidateOnStart();
 builder.Services.AddOptions<ChannelOptions>().Bind(builder.Configuration.GetSection(ChannelOptions.SectionName))
     .Validate(options => options.Enabled.Length > 0, "Channels:Enabled must list at least one channel, e.g. [\"ui\", \"email\", \"sms\", \"call\"].")
@@ -63,18 +70,22 @@ builder.Services.AddSingleton<FallbackPolicy>();
 builder.Services.AddSingleton<RecipientResolver>();
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddSingleton<IMessageRenderService, MessageRenderService>();
+builder.Services.AddSingleton<IConfigSnapshotCache, ConfigSnapshotCache>();
+builder.Services.AddSingleton<IDeliverySignal, DeliverySignal>();
 builder.Services.AddScoped<ITimelineService, TimelineService>();
 builder.Services.AddScoped<IAlertChangeService, AlertChangeService>();
 builder.Services.AddScoped<IDeliveryService, DeliveryService>();
 builder.Services.AddScoped<IConfigChangeService, ConfigChangeService>();
 builder.Services.AddScoped<IOutboxService, OutboxService>();
+builder.Services.AddScoped<ICleanupService, CleanupService>();
 
 builder.Services.AddSingleton<IEventPublisher, KafkaEventPublisher>();
 builder.Services.AddSingleton<KafkaConsumerFactory>();
 
 // A channel is one IChannelAdapter registration here plus its name in Channels:Enabled (contracts/runbooks.md §3).
 builder.Services.AddHttpClient<GatewayClient>(client =>
-    client.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Channels:GatewayTimeoutSeconds", 5)));
+    client.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Channels:GatewayTimeoutSeconds", 2)));
+builder.Services.AddSingleton<SmtpConnectionPool>();
 builder.Services.AddScoped<IChannelAdapter, UiChannel>();
 builder.Services.AddScoped<IChannelAdapter, EmailChannel>();
 builder.Services.AddScoped<IChannelAdapter, SmsChannel>();
@@ -85,6 +96,7 @@ builder.Services.AddHostedService<AlertChangesWorker>();
 builder.Services.AddHostedService<DeliveryWorker>();
 builder.Services.AddHostedService<ConfigChangesWorker>();
 builder.Services.AddHostedService<OutboxWorker>();
+builder.Services.AddHostedService<CleanupWorker>();
 
 var host = builder.Build();
 

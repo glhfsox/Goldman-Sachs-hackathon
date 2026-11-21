@@ -14,9 +14,25 @@ public sealed class FakeRepositories :
 {
     private readonly InMemoryStore _store;
 
+    public int LoadAllCalls { get; private set; }
+
     public FakeRepositories(InMemoryStore store)
     {
         _store = store;
+    }
+
+    async Task<Notification?> INotificationRepository.FindAsync(string id, CancellationToken cancellationToken)
+    {
+        await Task.CompletedTask;
+
+        return _store.Notifications.FirstOrDefault(notification => notification.Id == id);
+    }
+
+    public async Task<IReadOnlySet<string>> GetExistingIdsAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+
+        return _store.Notifications.Select(notification => notification.Id).Where(ids.Contains).ToHashSet();
     }
 
     public async Task<bool> ExistsAsync(string id, CancellationToken cancellationToken = default)
@@ -39,8 +55,8 @@ public sealed class FakeRepositories :
         return _store.Notifications.Where(notification => notification.AlertId == alertId && notification.IsOpen).ToList();
     }
 
-    public async Task<bool> HasDeliveredToGroupAsync(
-        string userId,
+    public async Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
+        IReadOnlyCollection<string> userIds,
         string groupKey,
         string excludedAlertId,
         DateTime since,
@@ -48,15 +64,17 @@ public sealed class FakeRepositories :
     {
         await Task.CompletedTask;
 
-        return _store.Notifications.Any(notification => notification.UserId == userId
+        return _store.Notifications.Where(notification => userIds.Contains(notification.UserId)
             && notification.GroupKey == groupKey
             && notification.AlertId != excludedAlertId
             && notification.Channel != "ui"
             && notification.CreatedAt >= since
-            && notification.Status is NotificationStatus.Pending or NotificationStatus.Sent or NotificationStatus.Failed);
+            && notification.Status is NotificationStatus.Pending or NotificationStatus.Sent or NotificationStatus.Failed)
+            .Select(notification => notification.UserId)
+            .ToHashSet();
     }
 
-    public async Task<IReadOnlyList<Notification>> ClaimDueAsync(
+    public async Task<IReadOnlyList<string>> ClaimDueAsync(
         DateTime now,
         int batchSize,
         DateTime leaseUntil,
@@ -68,7 +86,15 @@ public sealed class FakeRepositories :
             .Where(notification => notification.IsOpen && notification.SendAt <= now)
             .OrderBy(notification => notification.SendAt)
             .Take(batchSize)
+            .Select(notification => notification.Id)
             .ToList();
+    }
+
+    public async Task<int> DeleteFinishedBeforeAsync(DateTime before, CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+
+        return _store.Notifications.RemoveAll(notification => !notification.IsOpen && notification.UpdatedAt < before);
     }
 
     public async Task<Alert?> FindAsync(string id, CancellationToken cancellationToken = default)
@@ -154,6 +180,19 @@ public sealed class FakeRepositories :
         return _store.Copies<UserPreferences>().Where(preferences => userIds.Contains(preferences.UserId)).ToList();
     }
 
+    public async Task<ConfigCopies> LoadAllAsync(CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+        LoadAllCalls++;
+
+        return new ConfigCopies(
+            _store.Copies<Rule>().ToList(),
+            _store.Copies<User>().ToList(),
+            _store.Copies<Membership>().ToList(),
+            _store.Copies<UserPreferences>().ToList(),
+            _store.Copies<Runbook>().ToList());
+    }
+
     async Task IConfigRepository.AddAsync(object copy, CancellationToken cancellationToken)
     {
         await Task.CompletedTask;
@@ -165,17 +204,18 @@ public sealed class FakeRepositories :
         _store.Config.Remove(membership);
     }
 
-    async Task<RateCounter?> IRateCounterRepository.FindAsync(string userId, CancellationToken cancellationToken)
+    public async Task<RateCounter> LockAsync(string userId, DateTime now, CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
 
-        return _store.RateCounters.FirstOrDefault(counter => counter.UserId == userId);
-    }
+        var counter = _store.RateCounters.FirstOrDefault(existing => existing.UserId == userId);
+        if (counter is null)
+        {
+            counter = RateCounter.Create(userId, now);
+            _store.RateCounters.Add(counter);
+        }
 
-    public async Task AddAsync(RateCounter counter, CancellationToken cancellationToken = default)
-    {
-        await Task.CompletedTask;
-        _store.RateCounters.Add(counter);
+        return counter;
     }
 
     public async Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default)
@@ -193,6 +233,20 @@ public sealed class FakeRepositories :
         await Task.CompletedTask;
 
         return _store.Outbox.Where(message => message.ProcessedAt is null).Take(batchSize).ToList();
+    }
+
+    public async Task<int> DeleteProcessedBeforeAsync(DateTime before, CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+
+        return _store.Outbox.RemoveAll(message => message.ProcessedAt is { } processedAt && processedAt < before);
+    }
+
+    public async Task<int> DeleteBeforeAsync(DateTime before, CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+
+        return _store.ProcessedChanges.RemoveAll(change => change.ProcessedAt < before);
     }
 
     async Task<bool> IProcessedChangeRepository.ExistsAsync(string changeId, CancellationToken cancellationToken)

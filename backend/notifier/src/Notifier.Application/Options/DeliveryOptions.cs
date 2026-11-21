@@ -16,6 +16,9 @@ public sealed class DeliveryOptions
 
     public int PollIntervalMilliseconds { get; init; } = 500;
 
+    // Notifications of one batch sent at the same time, each with its own database connection.
+    public int MaxParallelism { get; init; } = 16;
+
     public string PublicBaseUrl { get; init; } = "http://localhost:3000";
 
     public Dictionary<string, string> Fallbacks { get; init; } = new()

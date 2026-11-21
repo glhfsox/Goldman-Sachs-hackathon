@@ -12,15 +12,18 @@ public sealed class KafkaConsumerFactory
         _options = options.Value;
     }
 
-    // Offsets are committed by hand after the database commit: at-least-once, applied idempotently.
-    // Earliest matters for the compacted config.changes: a fresh database reads the whole current state.
+    // An offset is stored by hand only after the database commit, and the stored offsets are committed in the
+    // background every 500 ms instead of one broker round trip per record: still at-least-once, applied
+    // idempotently. Earliest matters for the compacted config.changes: a fresh database reads the whole state.
     public IConsumer<string, string> Create()
     {
         var config = new ConsumerConfig
         {
             BootstrapServers = _options.Brokers,
             GroupId = _options.GroupId,
-            EnableAutoCommit = false,
+            EnableAutoCommit = true,
+            EnableAutoOffsetStore = false,
+            AutoCommitIntervalMs = 500,
             AutoOffsetReset = AutoOffsetReset.Earliest
         };
 

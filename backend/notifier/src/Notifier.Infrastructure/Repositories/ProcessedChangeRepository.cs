@@ -26,6 +26,13 @@ public sealed class ProcessedChangeRepository : IProcessedChangeRepository
         await _context.ProcessedChanges.AddAsync(change, cancellationToken);
     }
 
+    public async Task<int> DeleteBeforeAsync(DateTime before, CancellationToken cancellationToken = default)
+    {
+        return await _context.ProcessedChanges
+            .Where(change => change.ProcessedAt < before)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         await _context.SaveChangesAsync(cancellationToken);

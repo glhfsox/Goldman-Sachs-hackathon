@@ -21,9 +21,7 @@ public sealed class NotificationRepository : INotificationRepository
             ORDER BY send_at
             LIMIT {1}
             FOR UPDATE SKIP LOCKED)
-        RETURNING id, alert_id, incident_id, group_key, user_id, channel, change_id, escalation_step, reason,
-                  status, send_at, attempts, recipient, content, rendered, provider_id, sent_at, error,
-                  created_at, updated_at
+        RETURNING id AS "Value"
         """;
 
     private readonly NotifierDbContext _context;
@@ -33,10 +31,32 @@ public sealed class NotificationRepository : INotificationRepository
         _context = context;
     }
 
+    public async Task<Notification?> FindAsync(string id, CancellationToken cancellationToken = default)
+    {
+        return await _context.Notifications.FirstOrDefaultAsync(notification => notification.Id == id, cancellationToken);
+    }
+
     public async Task<bool> ExistsAsync(string id, CancellationToken cancellationToken = default)
     {
         return await _context.Notifications.AsNoTracking()
             .AnyAsync(notification => notification.Id == id, cancellationToken);
+    }
+
+    public async Task<IReadOnlySet<string>> GetExistingIdsAsync(
+        IReadOnlyCollection<string> ids,
+        CancellationToken cancellationToken = default)
+    {
+        if (ids.Count == 0)
+        {
+            return new HashSet<string>();
+        }
+
+        var existing = await _context.Notifications.AsNoTracking()
+            .Where(notification => ids.Contains(notification.Id))
+            .Select(notification => notification.Id)
+            .ToListAsync(cancellationToken);
+
+        return existing.ToHashSet();
     }
 
     public async Task AddAsync(Notification notification, CancellationToken cancellationToken = default)
@@ -53,35 +73,54 @@ public sealed class NotificationRepository : INotificationRepository
     }
 
     // UI rows do not count: seeing a card in the feed is not "being notified" about the incident.
-    public async Task<bool> HasDeliveredToGroupAsync(
-        string userId,
+    public async Task<IReadOnlySet<string>> GetNotifiedUsersAsync(
+        IReadOnlyCollection<string> userIds,
         string groupKey,
         string excludedAlertId,
         DateTime since,
         CancellationToken cancellationToken = default)
     {
-        return await _context.Notifications.AsNoTracking()
-            .AnyAsync(
-                notification => notification.UserId == userId
-                    && notification.GroupKey == groupKey
-                    && notification.AlertId != excludedAlertId
-                    && notification.Channel != "ui"
-                    && notification.CreatedAt >= since
-                    && (notification.Status == NotificationStatus.Pending
-                        || notification.Status == NotificationStatus.Sent
-                        || notification.Status == NotificationStatus.Failed),
-                cancellationToken);
+        if (userIds.Count == 0)
+        {
+            return new HashSet<string>();
+        }
+
+        var notified = await _context.Notifications.AsNoTracking()
+            .Where(notification => userIds.Contains(notification.UserId)
+                && notification.GroupKey == groupKey
+                && notification.AlertId != excludedAlertId
+                && notification.Channel != "ui"
+                && notification.CreatedAt >= since
+                && (notification.Status == NotificationStatus.Pending
+                    || notification.Status == NotificationStatus.Sent
+                    || notification.Status == NotificationStatus.Failed))
+            .Select(notification => notification.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return notified.ToHashSet();
     }
 
-    public async Task<IReadOnlyList<Notification>> ClaimDueAsync(
+    public async Task<IReadOnlyList<string>> ClaimDueAsync(
         DateTime now,
         int batchSize,
         DateTime leaseUntil,
         CancellationToken cancellationToken = default)
     {
-        return await _context.Notifications
-            .FromSqlRaw(ClaimDueSql, now, batchSize, leaseUntil)
+        return await _context.Database
+            .SqlQueryRaw<string>(ClaimDueSql, now, batchSize, leaseUntil)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<int> DeleteFinishedBeforeAsync(DateTime before, CancellationToken cancellationToken = default)
+    {
+        return await _context.Notifications
+            .Where(notification => notification.UpdatedAt < before
+                && (notification.Status == NotificationStatus.Sent
+                    || notification.Status == NotificationStatus.Dead
+                    || notification.Status == NotificationStatus.Cancelled
+                    || notification.Status == NotificationStatus.Suppressed))
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)

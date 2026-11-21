@@ -72,6 +72,17 @@ public sealed class ConfigRepository : IConfigRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<ConfigCopies> LoadAllAsync(CancellationToken cancellationToken = default)
+    {
+        var rules = await _context.Rules.AsNoTracking().ToListAsync(cancellationToken);
+        var users = await _context.Users.AsNoTracking().ToListAsync(cancellationToken);
+        var memberships = await _context.Memberships.AsNoTracking().ToListAsync(cancellationToken);
+        var preferences = await _context.Preferences.AsNoTracking().ToListAsync(cancellationToken);
+        var runbooks = await _context.Runbooks.AsNoTracking().ToListAsync(cancellationToken);
+
+        return new ConfigCopies(rules, users, memberships, preferences, runbooks);
+    }
+
     public async Task AddAsync(object copy, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(copy);

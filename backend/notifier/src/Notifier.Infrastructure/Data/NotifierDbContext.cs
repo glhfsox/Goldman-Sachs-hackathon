@@ -42,6 +42,20 @@ public class NotifierDbContext : DbContext
 
     public DbSet<ProcessedChange> ProcessedChanges => Set<ProcessedChange>();
 
+    // A repository that needs a row lock (rate counters) opens a transaction; saving ends it, so the lock
+    // is held exactly until the state it protects is written. Without one, this is a plain save.
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        if (Database.CurrentTransaction is { } transaction)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            await transaction.DisposeAsync();
+        }
+
+        return saved;
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigureNotifications(modelBuilder);

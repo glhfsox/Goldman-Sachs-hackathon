@@ -16,13 +16,16 @@ namespace Notifier.Application.Services;
 public sealed class ConfigChangeService : IConfigChangeService
 {
     private readonly IConfigRepository _config;
+    private readonly IConfigSnapshotCache _cache;
     private readonly ILogger<ConfigChangeService> _logger;
 
     public ConfigChangeService(
         IConfigRepository config,
+        IConfigSnapshotCache cache,
         ILogger<ConfigChangeService> logger)
     {
         _config = config;
+        _cache = cache;
         _logger = logger;
     }
 
@@ -58,6 +61,7 @@ public sealed class ConfigChangeService : IConfigChangeService
         }
 
         await _config.SaveChangesAsync(cancellationToken);
+        _cache.Invalidate();
     }
 
     private async Task ApplyRuleAsync(string id, JsonElement? body, DateTime updatedAt, CancellationToken cancellationToken)

@@ -45,6 +45,13 @@ public sealed class OutboxRepository : IOutboxRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<int> DeleteProcessedBeforeAsync(DateTime before, CancellationToken cancellationToken = default)
+    {
+        return await _context.OutboxMessages
+            .Where(message => message.ProcessedAt != null && message.ProcessedAt < before)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         await _context.SaveChangesAsync(cancellationToken);

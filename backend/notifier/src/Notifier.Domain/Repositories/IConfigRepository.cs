@@ -27,6 +27,8 @@ public interface IConfigRepository
 
     Task<IReadOnlyList<UserPreferences>> GetPreferencesAsync(IReadOnlyCollection<string> userIds, CancellationToken cancellationToken = default);
 
+    Task<ConfigCopies> LoadAllAsync(CancellationToken cancellationToken = default);
+
     Task AddAsync(object copy, CancellationToken cancellationToken = default);
 
     void Remove(Membership membership);

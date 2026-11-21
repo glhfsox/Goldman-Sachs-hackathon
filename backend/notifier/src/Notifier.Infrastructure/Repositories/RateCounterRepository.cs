@@ -8,6 +8,19 @@ namespace Notifier.Infrastructure.Repositories;
 
 public sealed class RateCounterRepository : IRateCounterRepository
 {
+    private const string InsertSql = """
+        INSERT INTO rate_counters (user_id, window_start, push_count, folded_count)
+        VALUES ({0}, {1}, 0, 0)
+        ON CONFLICT (user_id) DO NOTHING
+        """;
+
+    private const string LockSql = """
+        SELECT user_id, window_start, push_count, folded_count
+        FROM rate_counters
+        WHERE user_id = {0}
+        FOR UPDATE
+        """;
+
     private readonly NotifierDbContext _context;
 
     public RateCounterRepository(NotifierDbContext context)
@@ -15,18 +28,21 @@ public sealed class RateCounterRepository : IRateCounterRepository
         _context = context;
     }
 
-    public async Task<RateCounter?> FindAsync(string userId, CancellationToken cancellationToken = default)
+    // The row lock lives in a transaction that NotifierDbContext.SaveChangesAsync commits.
+    public async Task<RateCounter> LockAsync(string userId, DateTime now, CancellationToken cancellationToken = default)
     {
-        return await _context.RateCounters.FindAsync([userId], cancellationToken);
-    }
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
-    public async Task AddAsync(RateCounter counter, CancellationToken cancellationToken = default)
-    {
-        await _context.RateCounters.AddAsync(counter, cancellationToken);
-    }
+        if (_context.Database.CurrentTransaction is null)
+        {
+            await _context.Database.BeginTransactionAsync(cancellationToken);
+        }
 
-    public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        await _context.SaveChangesAsync(cancellationToken);
+        var fresh = RateCounter.Create(userId, now);
+        await _context.Database.ExecuteSqlRawAsync(InsertSql, [userId, fresh.WindowStart], cancellationToken);
+
+        var counters = await _context.RateCounters.FromSqlRaw(LockSql, userId).ToListAsync(cancellationToken);
+
+        return counters.Single();
     }
 }

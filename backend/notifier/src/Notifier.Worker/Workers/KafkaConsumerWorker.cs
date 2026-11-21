@@ -8,7 +8,8 @@ using Notifier.Infrastructure.Messaging;
 
 namespace Notifier.Worker.Workers;
 
-// Consume -> handle in a fresh scope -> commit only after the database commit (at-least-once).
+// Consume -> handle in a fresh scope -> store the offset only after the database commit (at-least-once);
+// stored offsets are committed in the background and on Close.
 // A record that fails for a transient reason is read again; one that can never be applied is logged and skipped.
 public abstract class KafkaConsumerWorker<TMessage> : BackgroundService
     where TMessage : class
@@ -64,7 +65,7 @@ public abstract class KafkaConsumerWorker<TMessage> : BackgroundService
 
                 if (await TryHandleAsync(result.Message.Value, stoppingToken))
                 {
-                    consumer.Commit(result);
+                    consumer.StoreOffset(result);
                 }
                 else
                 {

@@ -17,5 +17,8 @@ public sealed class ChannelOptions
 
     public string CallGatewayUrl { get; init; } = "http://localhost:8002/call";
 
-    public int GatewayTimeoutSeconds { get; init; } = 5;
+    public int GatewayTimeoutSeconds { get; init; } = 2;
+
+    // Open SMTP connections kept between emails; also the most emails sent at the same time.
+    public int SmtpPoolSize { get; init; } = 4;
 }

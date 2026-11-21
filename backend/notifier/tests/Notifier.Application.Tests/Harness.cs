@@ -17,17 +17,21 @@ public sealed class Harness
 {
     public Harness(DeliveryOptions? delivery = null)
     {
-        var repositories = new FakeRepositories(Store);
+        Repositories = new FakeRepositories(Store);
+        var repositories = Repositories;
         var timeline = new TimelineService(repositories);
         DeliveryOptions = delivery ?? new DeliveryOptions();
+        ConfigCache = new ConfigSnapshotCache(Clock, OptionsFactory.Create(new ConfigCacheOptions()));
 
-        Config = new ConfigChangeService(repositories, NullLogger<ConfigChangeService>.Instance);
+        Config = new ConfigChangeService(repositories, ConfigCache, NullLogger<ConfigChangeService>.Instance);
         AlertChanges = new AlertChangeService(
             repositories,
             repositories,
             repositories,
             repositories,
             timeline,
+            ConfigCache,
+            Signal,
             new EscalationLadder(),
             new RecipientResolver(),
             Clock,
@@ -49,6 +53,12 @@ public sealed class Harness
 
     public InMemoryStore Store { get; } = new();
 
+    public FakeRepositories Repositories { get; }
+
+    public FakeDeliverySignal Signal { get; } = new();
+
+    public ConfigSnapshotCache ConfigCache { get; }
+
     public FakeClock Clock { get; } = new();
 
     public FakeChannelRegistry Channels { get; } = new();
@@ -60,6 +70,15 @@ public sealed class Harness
     public AlertChangeService AlertChanges { get; }
 
     public DeliveryService Deliveries { get; }
+
+    // What DeliveryWorker does, one notification after another: claim the due rows, then deliver each.
+    public async Task DeliverDueAsync()
+    {
+        foreach (var id in await Deliveries.ClaimDueAsync())
+        {
+            await Deliveries.DeliverAsync(id);
+        }
+    }
 
     // What the api would publish on config.changes: a rule routing to the named users, and those users.
     public async Task SeedRuleAsync(string ruleId, string[]? channels, params string[] userIds)

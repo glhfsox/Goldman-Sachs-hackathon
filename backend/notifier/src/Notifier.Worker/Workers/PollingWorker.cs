@@ -2,20 +2,24 @@ namespace Notifier.Worker.Workers;
 
 public abstract class PollingWorker : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger _logger;
 
     protected PollingWorker(IServiceScopeFactory scopeFactory, ILogger logger)
     {
-        _scopeFactory = scopeFactory;
+        ScopeFactory = scopeFactory;
         _logger = logger;
     }
+
+    protected IServiceScopeFactory ScopeFactory { get; }
 
     protected abstract TimeSpan Interval { get; }
 
     protected abstract int BatchSize { get; }
 
     protected abstract Task<int> RunOnceAsync(IServiceProvider services, CancellationToken cancellationToken);
+
+    // Between rounds; a worker that can be woken early overrides this.
+    protected virtual Task WaitAsync(TimeSpan interval, CancellationToken cancellationToken) => Task.Delay(interval, cancellationToken);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -24,7 +28,7 @@ public abstract class PollingWorker : BackgroundService
             var handled = 0;
             try
             {
-                using var scope = _scopeFactory.CreateScope();
+                using var scope = ScopeFactory.CreateScope();
                 handled = await RunOnceAsync(scope.ServiceProvider, stoppingToken);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -35,7 +39,7 @@ public abstract class PollingWorker : BackgroundService
             // A full batch means more rows are waiting, so the next round starts at once.
             if (handled < BatchSize)
             {
-                await Task.Delay(Interval, stoppingToken);
+                await WaitAsync(Interval, stoppingToken);
             }
         }
     }

@@ -53,22 +53,30 @@ public sealed class DeliveryService : IDeliveryService
         _logger = logger;
     }
 
-    public async Task<int> DeliverDueAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<string>> ClaimDueAsync(CancellationToken cancellationToken = default)
     {
         var now = _clock.UtcNow;
-        var due = await _notifications.ClaimDueAsync(
+
+        return await _notifications.ClaimDueAsync(
             now,
             _options.BatchSize,
             now.AddSeconds(_options.LeaseSeconds),
             cancellationToken);
+    }
 
-        foreach (var notification in due)
+    public async Task DeliverAsync(string notificationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(notificationId);
+
+        // Cancelled by an ack, or cleaned up, since it was claimed.
+        var notification = await _notifications.FindAsync(notificationId, cancellationToken);
+        if (notification is null || !notification.IsOpen)
         {
-            await DeliverAsync(notification, cancellationToken);
-            await _notifications.SaveChangesAsync(cancellationToken);
+            return;
         }
 
-        return due.Count;
+        await DeliverAsync(notification, cancellationToken);
+        await _notifications.SaveChangesAsync(cancellationToken);
     }
 
     private async Task DeliverAsync(Notification notification, CancellationToken cancellationToken)
@@ -86,7 +94,7 @@ public sealed class DeliveryService : IDeliveryService
         }
 
         var recipient = notification.Recipient;
-        var counter = await FindCounterAsync(recipient, cancellationToken);
+        var counter = await LockCounterAsync(recipient, notification.Channel, cancellationToken);
         var decision = _gate.Decide(
             recipient,
             new Channel(notification.Channel),
@@ -193,23 +201,16 @@ public sealed class DeliveryService : IDeliveryService
         await _notifications.AddAsync(fallback, cancellationToken);
     }
 
-    private async Task<RateCounter?> FindCounterAsync(Recipient recipient, CancellationToken cancellationToken)
+    // Only a push channel counts against the limit, so only then is the person's counter locked.
+    // A quiet-hours downgrade only ever makes a channel quieter, so the planned channel decides.
+    private async Task<RateCounter?> LockCounterAsync(Recipient recipient, string channel, CancellationToken cancellationToken)
     {
-        if (recipient.MaxPushPerHour is null)
+        if (recipient.MaxPushPerHour is null || !new Channel(channel).IsPush)
         {
             return null;
         }
 
-        var counter = await _rateCounters.FindAsync(recipient.UserId, cancellationToken);
-        if (counter is not null)
-        {
-            return counter;
-        }
-
-        counter = RateCounter.Create(recipient.UserId, _clock.UtcNow);
-        await _rateCounters.AddAsync(counter, cancellationToken);
-
-        return counter;
+        return await _rateCounters.LockAsync(recipient.UserId, _clock.UtcNow, cancellationToken);
     }
 
     private TimeSpan Backoff(int attempt)
