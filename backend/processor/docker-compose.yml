@@ -4,13 +4,9 @@
 #   docker compose down -v              (stops everything, deletes the data)
 include:
   - path: ../kafka/docker-compose.yml
+  - path: ../redis/docker-compose.yml
 
 services:
-  redis:
-    image: redis:7.4.11
-    ports:
-      - "127.0.0.1:6379:6379"
-
   processor-db:
     image: postgres:17.11
     environment:
