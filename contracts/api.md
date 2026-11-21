@@ -65,6 +65,13 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `GET /proposals?status=open` | | `[Proposal]` |
 | `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal` |
 
+| `GET /actions` | | `[{name, risk, default_target, url_method, timeout_s}]`: the registered runbook actions ([runbooks.md](runbooks.md) §3) |
+| `GET /action-targets`, `GET /action-targets/{id}` | | `[ActionTarget]`, `ActionTarget` |
+| `PUT /action-targets/{id}` | `{base_url, origins?, operations, secret_ref?}` | `ActionTarget` (create or replace, `version` + 1). `422 invalid_action_target` with one `details` entry per wrong path; `409` when the change would make an active runbook invalid (the message names them) |
+
+An `ActionTarget` is `{id, base_url, origins, operations, secret_ref, version, updated_at}` ([runbooks.md](runbooks.md) §3).
+Saving a runbook or accepting it while another request changed the same runbook is `409 conflict`.
+
 A `Runbook` is `{id, team_id, title, format, source, canonical, status, version, accepted_by, accepted_at, updated_at}`;
 `canonical` is `null` on a draft.
 

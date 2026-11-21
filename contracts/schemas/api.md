@@ -50,6 +50,23 @@ Example row:
  "status": "sent"}, "why": "rule settlements-workflow-failed, on-call"}}
 ```
 
+### `action_targets`: where runbook actions go
+
+Owned by the api and read only by it, so it is not published on `config.changes`. Seeded by migration
+`AddActionTargets` with the demo targets of [../runbooks.md](../runbooks.md) §3.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | text, primary key | Lowercase letters, digits, `-` |
+| `base_url` | text, not null | Every call of this target goes here |
+| `origins` | jsonb, not null | `["http://counterparty-service"]`: origins a runbook `url` may name |
+| `operations` | jsonb, not null | `{name: {method, path, risk?}}` |
+| `secret_ref` | text | A secret's name, never the secret |
+| `version` | int, not null | Starts at 1, + 1 on every change; concurrency token |
+| `updated_at` | timestamptz, not null | |
+
+`runbooks.version` is a concurrency token too: a save that read an older version fails with `409`.
+
 ### `action_runs`
 
 | Column | Type | Notes |

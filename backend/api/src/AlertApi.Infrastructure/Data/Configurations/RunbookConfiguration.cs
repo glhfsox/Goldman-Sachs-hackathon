@@ -18,7 +18,7 @@ public sealed class RunbookConfiguration : IEntityTypeConfiguration<Runbook>
         builder.Property(runbook => runbook.Source).HasColumnName("source").IsRequired();
         builder.Property(runbook => runbook.Canonical).HasColumnName("canonical").HasColumnType("jsonb");
         builder.Property(runbook => runbook.Status).HasColumnName("status").IsRequired();
-        builder.Property(runbook => runbook.Version).HasColumnName("version");
+        builder.Property(runbook => runbook.Version).HasColumnName("version").IsConcurrencyToken();
         builder.Property(runbook => runbook.AcceptedBy).HasColumnName("accepted_by");
         builder.Property(runbook => runbook.AcceptedAt).HasColumnName("accepted_at");
         builder.Property(runbook => runbook.UpdatedAt).HasColumnName("updated_at");
