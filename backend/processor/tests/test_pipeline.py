@@ -122,6 +122,14 @@ def test_bad_rows_do_not_block_valid_ones():
     assert [row for row, _ in errors] == [1, "alertmanager"] and "priority" in errors[1][1]
 
 
+def test_rule_severity_is_validated_and_carried_by_the_match(mappings):
+    rules, errors = compile_rules([EXAMPLE_RULES[0] | {"severity": "info"}, EXAMPLE_RULES[0] | {"id": "x", "severity": "urgent"}])
+    assert [r.id for r in rules] == ["settlements-workflow-failed"] and [row for row, _ in errors] == ["x"]
+    env = _env("workflow", mappings)
+    assert match_rules(env, rules)[0].severity == "info" and env["severity"] == "critical"
+    assert match_rules(env, compile_rules([EXAMPLE_RULES[0]])[0])[0].severity is None
+
+
 def test_template_renders_non_strings_as_json():
     rules, _ = compile_rules([EXAMPLE_RULES[3] | {"id": "r", "when": {"all": []},
                                                   "present": {"title": "{{d}} {{n}} {{b}}"}}])

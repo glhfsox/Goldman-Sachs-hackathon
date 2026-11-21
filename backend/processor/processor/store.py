@@ -196,7 +196,7 @@ class Store:
                 for it in todo:
                     env, key = it.envelope, it.match.alert_key
                     pipe.evalsha(self._sha["hit"], 2, _hash_key(key), DIRTY, it.partition, it.offset,
-                                 _ms(env["ts"]), _ms(env["received_at"]), SEV_RANK[env["severity"]],
+                                 _ms(env["ts"]), _ms(env["received_at"]), SEV_RANK[it.match.severity or env["severity"]],
                                  it.window_s, key)
             results = self._exec(fill)[len(seeds):]
             first, again, seeds = {}, set(), []
@@ -246,11 +246,12 @@ class Store:
                             out[m.alert_key] = old, True  # a redelivered opener of an alert resolved since: already applied
                         # rules.md §4: auto-resolve after window_s of silence, reopen within another window_s
                         elif old and received - old["last_received_at"] < timedelta(seconds=2 * it.window_s):
-                            reopens.append((max(old["severity"], env["severity"], key=SEV_RANK.get), env["ts"], received,
+                            # a rule's fixed severity replaces the old one, which may predate a change to the rule
+                            reopens.append((m.severity or max(old["severity"], env["severity"], key=SEV_RANK.get), env["ts"], received,
                                             env["event_id"], it.partition, it.offset, it.window_s, old["id"]))
                         else:
                             inserts.append((
-                                str(uuid.uuid4()), m.alert_key, m.rule_id, m.team_id, env["severity"],
+                                str(uuid.uuid4()), m.alert_key, m.rule_id, m.team_id, m.severity or env["severity"],
                                 _cut(m.title, TITLE_MAX), _cut(m.body, BODY_MAX),
                                 Jsonb({k: _capped_field(v) for k, v in m.fields.items()}), m.color, env["ts"], env["ts"],
                                 received, received, it.runbook_id, Jsonb({**env, "raw": _capped_raw(env["raw"])}),

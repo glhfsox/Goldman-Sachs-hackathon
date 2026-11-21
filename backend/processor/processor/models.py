@@ -173,6 +173,7 @@ class Rule(_Model):
     name: str | None = None
     enabled: bool = True
     when: Condition
+    severity: Severity | None = None
     alert_key: list[Path] | None = None
     window_s: int = Field(300, gt=0)
     route: Route

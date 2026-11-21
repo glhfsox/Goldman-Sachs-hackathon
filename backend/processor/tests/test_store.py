@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 import pytest
 
-from conftest import PAYLOADS, make_event
-from processor import build_envelope, match_rules
+from conftest import EXAMPLE_RULES, PAYLOADS, make_event
+from processor import build_envelope, compile_rules, match_rules
 from processor.store import DIRTY, FLUSH_LOCK, GRACE_S, RESOLVE_LOCK, Item, Store
 from processor.store import _hash_key as store_hash
 
@@ -776,3 +776,53 @@ def test_window_s_follows_the_rule_on_insert_and_reopen(new_store, new_redis, ba
     store.process(windowed(batch("workflow", [2], at=100), 120))  # the rule's window changed in between
     store.flush()
     assert sql("SELECT status, window_s FROM alerts") == [{"status": "open", "window_s": 120}]
+
+
+# --- a rule's own severity (rules.md §4) ---
+
+SETTLEMENTS = EXAMPLE_RULES[0]
+
+
+def ruled(mappings, bodies, offsets, at=0.0, **payload):
+    """Items of a workflow event matched against these rule bodies instead of the seeded ones."""
+    rules, errors = compile_rules(bodies)
+    assert errors == []
+    out = []
+    for o in offsets:
+        event = make_event(PAYLOADS["workflow"][0], {**PAYLOADS["workflow"][1], **payload}, f"0-{o}")
+        event["received_at"] = (T0 + timedelta(seconds=at)).isoformat(timespec="milliseconds")[:-6] + "Z"
+        env = build_envelope(event, mappings)
+        out += [Item(env, m, 300, None, 0, o) for m in match_rules(env, rules)]
+    return out
+
+
+@pytest.mark.parametrize("event_sev", ["warning", "critical"])  # below and above the rule's
+def test_rule_severity_overrides_the_event_on_open(new_store, mappings, sql, event_sev):
+    store = new_store()
+    store.process(ruled(mappings, [SETTLEMENTS | {"severity": "error"}], [0], severity=event_sev))
+    store.process(ruled(mappings, [SETTLEMENTS | {"severity": "error"}], [1], severity="critical"))  # later, above the rule's
+    store.flush()
+    [opened] = changes(sql, "opened")
+    assert opened["alert"]["severity"] == "error" and opened["alert"]["sample_event"]["severity"] == event_sev
+    assert changes(sql, "severity_raised") == [] and sql("SELECT severity FROM alerts") == [{"severity": "error"}]
+
+
+def test_two_teams_rules_on_one_event_give_two_alerts_with_their_severities(new_store, mappings, sql):
+    bodies = [SETTLEMENTS | {"severity": "critical"}, SETTLEMENTS | {"id": "ops-watch", "team_id": "ops", "severity": "info"}]
+    new_store().process(ruled(mappings, bodies, [0]))
+    assert sorted((c["alert"]["team_id"], c["alert"]["severity"]) for c in changes(sql, "opened")) == [
+        ("ops", "info"), ("settlements", "critical")]
+
+
+def test_rule_severity_changed_while_open_raises_now_and_lowers_on_reopen(new_store, new_redis, mappings, sql):
+    store = new_store()  # the events say info: only the rule can raise the alert
+    store.process(ruled(mappings, [SETTLEMENTS | {"severity": "warning"}], [0], severity="info"))
+    store.process(ruled(mappings, [SETTLEMENTS | {"severity": "critical"}], [1], severity="info"))  # raised: next event raises the alert
+    store.process(ruled(mappings, [SETTLEMENTS | {"severity": "info"}], [2], severity="info"))  # lowered: an open alert keeps its severity
+    store.flush()
+    assert sql("SELECT severity, count FROM alerts") == [{"severity": "critical", "count": 3}]
+    assert [(c["change"], c["alert"]["severity"]) for c in changes(sql)] == [("opened", "warning"), ("severity_raised", "critical")]
+    resolve_all(sql)
+    new_redis().flushall()  # the miss path reopens it
+    store.process(ruled(mappings, [SETTLEMENTS | {"severity": "info"}], [3], at=10))
+    assert changes(sql, "reopened")[0]["alert"]["severity"] == "info"

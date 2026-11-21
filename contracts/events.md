@@ -99,7 +99,7 @@ Only state changes, never one record per event.
 | `change` | Published by | When |
 |---|---|---|
 | `opened` | processor | First event for an alert key |
-| `severity_raised` | processor | A later event has a higher severity |
+| `severity_raised` | processor | A later event has a higher severity, or its rule's `severity` was raised |
 | `count_threshold` | processor | `count` crosses 10, 100, 1000 |
 | `reopened` | processor | An event arrives for a resolved alert inside its reopen window |
 | `acked`, `resolved` | api (`actor` = user id) | A person acts in the UI |
@@ -123,7 +123,7 @@ The notifier builds its messages from them and needs nothing else from the proce
 |---|---|---|
 | Title | `alert.title` | Text, at most 300 characters, never empty: the rule's title template, else the rule's name, else `type · service` |
 | Message | `alert.body` | Text, at most 2,000 characters; empty string when the rule has no body template |
-| Severity | `alert.severity` | `info`, `warning`, `error` or `critical`: the highest seen on this alert so far |
+| Severity | `alert.severity` | `info`, `warning`, `error` or `critical`: the rule's `severity` when it sets one ([rules.md](rules.md) §4), else the highest event severity seen on this alert so far. `alert.sample_event.severity` is always the event's |
 | Time of this change | `at` | When it happened, ingest clock (for an auto `resolved`: the processor's clock). Use it for ordering and for "sent N seconds after" |
 | Time of the problem | `alert.first_seen`, `alert.last_seen` | Event time of the first and of the latest event, as the source reported it |
 | Which alert | `alert.id`, `change_id`, `change` | `alert.id` for the short link and for cancelling on ack; `change_id` to ignore a record delivered twice |

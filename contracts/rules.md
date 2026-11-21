@@ -102,6 +102,12 @@ example below is a seeded one.
 - `alert_key`: paths whose values, with the rule id, identify one alert. Dedup and grouping are the same
   mechanism: every matching event with the same key increments that alert's `count`. Default when omitted:
   `["type", "service"]` plus the envelope's `dedup_hints`.
+- `severity` (optional): `info`, `warning`, `error` or `critical`. When set, every alert of this rule has
+  exactly this severity, lower or higher than the event's; when absent or null, the alert takes the event's
+  severity and keeps the highest seen. `when` and `alert.sample_event` still see the event's severity.
+  Changed while an alert is open: a higher value raises it on the next event (`severity_raised`); a lower
+  one is applied when the alert is next opened or reopened, never to an open alert. Removing `severity`
+  leaves the alert's current severity until it is opened anew after its reopen window.
 - `window_s` (default 300): the alert stays open for events with its key until none has arrived for
   `window_s`; then the processor auto-resolves it. An event within another `window_s` after that reopens it.
 - `route.recipients`: `{"team": id}` (all members), `{"team": id, "on_call": true}` or `{"user": id}`.
@@ -115,7 +121,7 @@ example below is a seeded one.
 - The processor reloads rules and mappings within 5 s of a change (they arrive on Kafka `config.changes`,
   [events.md](events.md) §6).
 
-The other three example rules from the brief, as `when` / `alert_key` / `route` / `present`:
+The other three example rules from the brief, as `when` / `severity` / `alert_key` / `route` / `present`:
 
 ```json
 {"id": "pricing-engine-errors", "team_id": "pricing",
@@ -129,6 +135,7 @@ The other three example rules from the brief, as `when` / `alert_key` / `route` 
  "when": {"all": [{"field": "type", "op": "glob", "value": "trade.rejected*"},
                   {"field": "payload.desk", "op": "eq", "value": "rates"},
                   {"field": "payload.notional", "op": "gt", "value": 10000000}]},
+ "severity": "critical",
  "route": {"recipients": [{"team": "rates"}], "channels": ["email", "ui"]},
  "present": {"title": "Trade {{payload.tradeId}} rejected: {{payload.reason}} ({{payload.notional}} {{payload.currency}})"}}
 
