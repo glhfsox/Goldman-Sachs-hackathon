@@ -2,7 +2,7 @@
 
 This zone plays the outside world: systems that send us events over Kafka and HTTP. The interface,
 including what each source sends, is in [contracts/data/sources.md](../contracts/data/sources.md).
-The `kafka-sources` broker is in [kafka-sources/](kafka-sources/README.md); the simulator code is still to come.
+The `kafka-sources` broker is in [kafka-sources/](kafka-sources/README.md), the simulator in [simulator/](simulator/README.md).
 
 ## The story behind the data
 

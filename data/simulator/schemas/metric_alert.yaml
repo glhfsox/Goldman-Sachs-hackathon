@@ -1,0 +1,21 @@
+name: metric_alert
+source: alertmanager-http
+description: Monitoring alert, flat Alertmanager-like shape, one alert per request (contracts/data/sources.md §4.3)
+fields:
+  alertname: {$choice: [HighErrorRate, HighLatency, PodCrashLooping, DiskFillingUp], $weights: [3, 3, 2, 1]}
+  labels:
+    service: {$choice: [payments-api, pricing-engine, counterparty-service, trade-gateway]}
+    region: {$choice: [eu-west, us-east, ap-south], $weights: [5, 3, 2]}
+    severity: {$choice: [critical, warning, info], $weights: [2, 5, 3]}
+    instance: {$p: 0.5, $faker: ipv4_private}
+  annotations:
+    summary:
+      $map: alertname
+      $values:
+        HighErrorRate: {$choice: ["Error rate 12% over the last 5 minutes", "Error rate 7% over the last 5 minutes", "Error rate 23% over the last 5 minutes"]}
+        HighLatency: {$choice: ["p99 latency 2.4 s over the last 5 minutes", "p99 latency 1.1 s over the last 5 minutes"]}
+        PodCrashLooping: {$pattern: "Pod {labels.service}-#?#?? restarted 5 times in 10 minutes"}
+        DiskFillingUp: {$choice: ["Disk 91% full, full in 4 hours", "Disk 85% full, full in 12 hours"]}
+  startsAt: {$now: iso_ms, $offset_s: -30}
+  status: {$choice: [firing, resolved], $weights: [9, 1]}
+  endsAt: {$if: {path: status, eq: resolved}, $now: iso_ms}

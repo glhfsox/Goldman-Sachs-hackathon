@@ -1,0 +1,36 @@
+name: k8s_event
+source: alertmanager-http
+description: >-
+  Kubernetes event that monitoring starts forwarding mid-demo. Deliberately NOT in the contract's payload
+  catalog: it is the "never-seen schema" case (contracts/data/sources.md §4.5) that the AI worker maps.
+fields:
+  apiVersion: v1
+  kind: Event
+  metadata:
+    uid: {$faker: uuid4}
+    namespace: {$choice: [pricing, payments, settlements], $weights: [3, 1, 1]}
+    creationTimestamp: {$now: iso_s}
+  involvedObject:
+    kind: Pod
+    name:
+      $map: metadata.namespace
+      $values:
+        pricing: {$pattern: "pricing-engine-3-#?#?#-?#??#"}
+        payments: {$pattern: "payments-api-#?#?#-?#??#"}
+        settlements: {$pattern: "counterparty-service-#?#?#-?#??#"}
+    namespace: {$ref: metadata.namespace}
+  reason: {$choice: [BackOff, OOMKilled, Unhealthy, FailedScheduling], $weights: [4, 2, 3, 1]}
+  message:
+    $map: reason
+    $values:
+      BackOff: "Back-off restarting failed container"
+      OOMKilled: "Container was OOM-killed (limit 2Gi)"
+      Unhealthy: "Readiness probe failed: HTTP probe failed with statuscode: 503"
+      FailedScheduling: "0/6 nodes are available: 6 Insufficient memory"
+  type: Warning
+  count: {$int: [1, 30]}
+  firstTimestamp: {$now: iso_s, $offset_s: -600}
+  lastTimestamp: {$now: iso_s}
+  source:
+    component: kubelet
+    host: {$faker: hostname}
