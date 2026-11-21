@@ -15,6 +15,8 @@ Timestamps are ISO 8601 UTC with milliseconds. Ids are opaque strings (ULID or U
 
 The body is the event: the `Content-Type` header is ignored. Errors are `application/problem+json`.
 
+OpenAPI spec: `http://localhost:8001/openapi/v1.json`; Swagger UI: `http://localhost:8001/swagger` (on with `ENABLE_SWAGGER=true`). A Postman collection for this endpoint is in `backend/ingest/postman/`.
+
 A Kafka source is a `sources` row of kind `kafka` naming a `source.*` topic on the separate sources
 cluster (`SOURCE_KAFKA_BROKERS`), e.g. `{"id": "workflows-kafka", "kind": "kafka", "config": {"topic": "source.workflows"}}`.
 Ingest consumes it and republishes each message to `events.raw` on the internal cluster in the same raw record. Ingest never parses, filters or transforms the payload.

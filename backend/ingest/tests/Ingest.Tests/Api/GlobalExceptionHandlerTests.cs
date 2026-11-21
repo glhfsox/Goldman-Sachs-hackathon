@@ -15,16 +15,17 @@ public sealed class GlobalExceptionHandlerTests
     [Fact]
     public async Task TryHandleAsync_AppException_UsesItsOwnStatus()
     {
-        var (status, body) = await HandleAsync(new SampleNotFoundException(), Environments.Production);
+        var (status, body, contentType) = await HandleAsync(new SampleNotFoundException(), Environments.Production);
 
         Assert.Equal(404, status);
+        Assert.StartsWith("application/problem+json", contentType);
         Assert.Equal("Sample was not found.", body.GetProperty("detail").GetString());
     }
 
     [Fact]
     public async Task TryHandleAsync_UnknownException_HidesMessageOutsideDevelopment()
     {
-        var (status, body) = await HandleAsync(new InvalidOperationException("secret"), Environments.Production);
+        var (status, body, _) = await HandleAsync(new InvalidOperationException("secret"), Environments.Production);
 
         Assert.Equal(500, status);
         Assert.DoesNotContain("secret", body.GetProperty("detail").GetString());
@@ -33,12 +34,12 @@ public sealed class GlobalExceptionHandlerTests
     [Fact]
     public async Task TryHandleAsync_UnknownException_ShowsMessageInDevelopment()
     {
-        var (_, body) = await HandleAsync(new InvalidOperationException("secret"), Environments.Development);
+        var (_, body, _) = await HandleAsync(new InvalidOperationException("secret"), Environments.Development);
 
         Assert.Equal("secret", body.GetProperty("detail").GetString());
     }
 
-    private static async Task<(int Status, JsonElement Body)> HandleAsync(Exception exception, string environmentName)
+    private static async Task<(int Status, JsonElement Body, string? ContentType)> HandleAsync(Exception exception, string environmentName)
     {
         var handler = new GlobalExceptionHandler(
             new TestEnvironment(environmentName),
@@ -52,7 +53,7 @@ public sealed class GlobalExceptionHandlerTests
         context.Response.Body.Position = 0;
         var body = await JsonDocument.ParseAsync(context.Response.Body);
 
-        return (context.Response.StatusCode, body.RootElement);
+        return (context.Response.StatusCode, body.RootElement, context.Response.ContentType);
     }
 
     private sealed class SampleNotFoundException : NotFoundException

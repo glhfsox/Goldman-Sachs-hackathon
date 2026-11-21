@@ -48,7 +48,12 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         }
 
         httpContext.Response.StatusCode = problem.Status!.Value;
-        await httpContext.Response.WriteAsJsonAsync(problem, cancellationToken);
+        // contracts/events.md promises application/problem+json; WriteAsJsonAsync alone sends application/json.
+        await httpContext.Response.WriteAsJsonAsync(
+            problem,
+            options: null,
+            contentType: "application/problem+json",
+            cancellationToken);
 
         return true;
     }
