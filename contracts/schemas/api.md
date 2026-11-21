@@ -1,6 +1,6 @@
 # Database `api` (service: api)
 
-Host `api-db`. Only the api connects. Migrations: `backend/api/migrations/`.
+Host `api-db`. Only the api connects. Migrations: `backend/api/src/AlertApi.Infrastructure/Migrations/`.
 Shared rules: [../storage.md](../storage.md). The REST shapes built from these tables: [../api.md](../api.md).
 
 ## Owned tables: configuration
@@ -77,10 +77,11 @@ Example row:
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | bigserial, primary key | Published in `id` order, then deleted |
+| `id` | bigint identity, primary key | Published in `id` order, then deleted |
 | `topic` | text, not null | `config.changes` or `alerts.changes` (ack, resolve) |
 | `key` | text, not null | |
 | `payload` | jsonb, not null | The record, exactly as in [../events.md](../events.md) |
+| `created_at` | timestamptz, not null | When the row was written |
 
 ## Copies (read models)
 
