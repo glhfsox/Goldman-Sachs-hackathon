@@ -1,0 +1,18 @@
+# The whole system in one command, from a fresh clone:   docker compose up -d --build
+# Every service keeps its own compose file; this file only includes them, so a service still runs alone
+# from its folder. Shared files (backend/kafka, data/kafka-sources) are included by several services and
+# merged into one copy. What is added for the full stack only lives in backend/stack/ (README there).
+#   docker compose logs -f seed     the brief's mappings, rules and runbook, loaded through the api
+#   docker compose down -v          stops everything and deletes the data
+name: alerting
+
+include:
+  - path: backend/ingest/docker-compose.yml
+  - path: backend/processor/docker-compose.yml
+  - path: backend/notifier/docker-compose.dev.yml
+  - path: backend/api/docker-compose.yml
+  # The ai-worker talks to the real api here, not to its stub (which would also take port 8000).
+  - path:
+      - backend/ai-worker/docker-compose.yml
+      - backend/stack/ai-worker.override.yml
+  - path: backend/stack/docker-compose.yml

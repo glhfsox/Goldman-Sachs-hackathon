@@ -1,0 +1,40 @@
+{
+  "id": "alertmanager",
+  "status": "active",
+  "origin": "seed",
+  "priority": 100,
+  "match": {
+    "all": [
+      {
+        "field": "source",
+        "op": "eq",
+        "value": "alertmanager-http"
+      },
+      {
+        "field": "raw.alertname",
+        "op": "exists"
+      }
+    ]
+  },
+  "fields": {
+    "type": {
+      "path": "alertname"
+    },
+    "service": {
+      "path": "labels.service"
+    },
+    "severity": {
+      "path": "labels.severity"
+    },
+    "env": {
+      "const": "prod"
+    },
+    "ts": {
+      "path": "startsAt",
+      "format": "iso"
+    }
+  },
+  "dedup_fields": [
+    "labels.region"
+  ]
+}

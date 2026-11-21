@@ -201,7 +201,7 @@ public sealed class ActivityTests : IClassFixture<PostgresFixture>
         var mappings = await client.GetFromJsonAsync<JsonElement>("/api/mappings");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.Equal(0, mappings.GetArrayLength());
+        Assert.DoesNotContain(mappings.EnumerateArray(), mapping => mapping.GetProperty("id").GetString() == "trade-v1");
     }
 
     [Fact]

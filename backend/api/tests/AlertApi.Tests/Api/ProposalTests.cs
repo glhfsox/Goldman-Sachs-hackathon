@@ -17,12 +17,6 @@ namespace AlertApi.Tests.Api;
 [Trait("Category", "Integration")]
 public sealed class ProposalTests : IClassFixture<PostgresFixture>
 {
-    private const string Rule = """
-        {"id": "settlements-workflow-failed", "team_id": "settlements",
-         "when": {"all": [{"field": "type", "op": "eq", "value": "WORKFLOW_FAILED"}]},
-         "route": {"recipients": [{"team": "settlements"}], "channels": ["ui"]}}
-        """;
-
     private const string RuleSeverity = """
         {"kind": "rule_severity", "body": {"rule_id": "settlements-workflow-failed", "team_id": "settlements",
          "severity": "critical", "current_severity": null, "confidence": 0.82, "mode": "first", "stats": null,
@@ -141,7 +135,7 @@ public sealed class ProposalTests : IClassFixture<PostgresFixture>
         using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
         using var client = factory.CreateClient();
         await Apply(factory, ActivityRecords.AlertChange("c-1", "opened"));
-        await client.PostAsync("/api/rules", Json(Rule));
+        // settlements-workflow-failed comes with the seed; its record plus the severity change make two.
         var id = await Create(client, RuleSeverity);
 
         var accepted = await Send(client, $"/api/proposals/{id}/accept", "anna", null);
@@ -167,7 +161,7 @@ public sealed class ProposalTests : IClassFixture<PostgresFixture>
         using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
         using var client = factory.CreateClient();
         await Apply(factory, ActivityRecords.AlertChange("c-1", "opened"));
-        var id = await Create(client, RuleSeverity);
+        var id = await Create(client, RuleSeverity.Replace("settlements-workflow-failed", "deleted-rule"));
 
         var service = await Send(client, $"/api/proposals/{id}/accept", "ai-worker", null);
         var noUser = await Send(client, $"/api/proposals/{id}/reject", null, null);

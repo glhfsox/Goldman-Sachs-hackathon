@@ -1,0 +1,37 @@
+{
+  "id": "workflow-failed",
+  "status": "active",
+  "origin": "seed",
+  "priority": 100,
+  "match": {
+    "all": [
+      {
+        "field": "raw.type",
+        "op": "eq",
+        "value": "WORKFLOW_FAILED"
+      }
+    ]
+  },
+  "fields": {
+    "type": {
+      "path": "type"
+    },
+    "service": {
+      "path": "workflowName"
+    },
+    "severity": {
+      "path": "severity"
+    },
+    "env": {
+      "path": "environment"
+    },
+    "ts": {
+      "path": "timestamp",
+      "format": "iso"
+    }
+  },
+  "dedup_fields": [
+    "workflowName",
+    "error.code"
+  ]
+}
