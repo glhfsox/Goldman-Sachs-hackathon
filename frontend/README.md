@@ -5,6 +5,10 @@ It talks only to the API service ([contracts/api.md](../contracts/api.md)): REST
 
 ## Run
 
+The whole system, UI included, from the repo root: `docker compose up -d --build`, then http://localhost:3000.
+
+For working on the UI (hot reload):
+
 ```bash
 cd backend/api && docker compose up -d --build     # the API on :8000 (with its database and Kafka)
 cd frontend && npm install && npm run dev           # the UI on http://localhost:3000
@@ -12,7 +16,8 @@ cd frontend && npm install && npm run dev           # the UI on http://localhost
 
 The dev server forwards `/api` and `/ws` to `VITE_API_URL` (default `http://localhost:8000`), so the browser never
 makes a cross-origin call and the API needs no CORS. In a container, nginx does the same (`Dockerfile`, `nginx.conf`,
-upstream `API_UPSTREAM`, default `api:8000`).
+`docker-compose.yml`, upstream `API_UPSTREAM`, default `api:8000`); alone against an API on this machine:
+`API_UPSTREAM=host.docker.internal:8000 docker compose up -d --build` here.
 
 ## Who you are
 
