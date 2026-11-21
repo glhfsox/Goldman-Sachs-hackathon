@@ -5,6 +5,8 @@ from ai_worker import jobs, main
 from ai_worker.agent import JobFailed
 from ai_worker.api import ApiError
 
+KINDS = list(main.HANDLERS)
+
 
 def rows(pg):
     return pg.execute("SELECT id, status, attempts, result, error FROM jobs ORDER BY id").fetchall()
@@ -20,22 +22,41 @@ def test_enqueue_twice_is_one_row(conns):
 def test_claim_locks_the_row_until_finish(conns, db):
     pg, jobs_pg = conns
     jobs.enqueue(pg, "schema:a", "mapping", {"n": 1})
-    job = jobs.claim(jobs_pg)
+    job = jobs.claim(jobs_pg, KINDS)
     assert job["id"] == "schema:a" and job["input"] == {"n": 1}
     with psycopg.connect(db) as other:  # a second replica skips the locked row
-        assert jobs.claim(other) is None
+        assert jobs.claim(other, KINDS) is None
     jobs.finish(jobs_pg, job, result={"mapping_id": "m"})
     assert rows(pg) == [("schema:a", "done", 1, {"mapping_id": "m"}, None)]
-    assert jobs.claim(jobs_pg) is None
+    assert jobs.claim(jobs_pg, KINDS) is None
 
 
 def test_finished_at_is_the_end_of_the_job_not_the_claim(conns):
     pg, jobs_pg = conns
     jobs.enqueue(pg, "schema:a", "mapping", {})
-    job = jobs.claim(jobs_pg)
+    job = jobs.claim(jobs_pg, KINDS)
     after_claim = pg.execute("SELECT clock_timestamp()").fetchone()[0]
     jobs.finish(jobs_pg, job, result={})
     assert pg.execute("SELECT finished_at FROM jobs").fetchone()[0] > after_claim
+
+
+@pytest.mark.parametrize("bad", ["marek\x00", "\ud800"])
+def test_a_record_postgres_cannot_store_is_skipped(worker, bad):
+    w, pg, _, _ = worker
+    alert = {"id": "A1", "rule_id": "r1", "title": "t"}
+    w._change({"change_id": "c1", "change": "resolved", "at": "2026-11-20T10:00:00Z", "actor": bad, "alert": alert})
+    w._change({"change_id": "c2", "change": "resolved", "at": "2026-11-20T10:00:00Z", "actor": "marek", "alert": alert})
+    assert pg.execute("SELECT resolved_by FROM alert_history").fetchall() == [("marek",)]
+    assert [r[0] for r in rows(pg)] == ["proposal:A1"]
+
+
+def test_claim_takes_only_the_given_kinds(conns):
+    pg, jobs_pg = conns
+    jobs.enqueue(pg, "schema:a", "mapping", {})
+    jobs.enqueue(pg, "severity:r1:first", "severity", {})
+    assert jobs.claim(jobs_pg, ["severity"])["id"] == "severity:r1:first"
+    jobs_pg.rollback()
+    assert jobs.claim(jobs_pg, []) is None
 
 
 def test_other_samples(conns):

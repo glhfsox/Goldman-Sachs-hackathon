@@ -15,7 +15,7 @@ The stack of each service is its owners' choice; the interfaces here are JSON sh
 | processor (owner: glhfsox) | `backend/processor/` | none | Kafka `events.raw`, `config.changes` (mappings, rules, service map), `alerts.changes` (acked, resolved) | Kafka `alerts.changes`, `schema.samples`; Redis `ui.alerts` |
 | notifier | `backend/notifier/` | none | Kafka `alerts.changes`, `config.changes` (rules, teams, users, memberships, preferences, runbooks) | Channel adapters; Kafka `alerts.timeline` |
 | api | `backend/api/` | 8000 (HTTP + WebSocket) | Kafka `alerts.changes`, `alerts.timeline`, `schema.samples`; Redis `ui.alerts` | Kafka `config.changes`, `alerts.changes` (acked, resolved); REST and WebSocket |
-| ai-worker (owners: glhfsox, spdsslg) | `backend/ai-worker/` | none | Kafka `schema.samples`, `config.changes` (runbook drafts, mappings), `alerts.changes` (resolved); the api's `GET /alerts/{id}`; Claude API | REST calls to the api: mappings, canonical runbooks, proposals |
+| ai-worker (owners: glhfsox, spdsslg) | `backend/ai-worker/` | none | Kafka `schema.samples`, `config.changes` (runbook drafts, mappings, rules), `alerts.changes` (every record); the api's `GET /alerts/{id}`, `GET /runs` (pending risk checks, finished runs); Claude API; TypeSafe API (Jev) | REST calls to the api: mappings, canonical runbooks, run risk checks (`POST /runs/{id}/risk-check`), proposals (`runbook`, `rule_severity`, `runbook_start`) |
 | UI | `frontend/` | 3000 | API on 8000 | none |
 
 Interface details: [events.md](events.md), [rules.md](rules.md), [storage.md](storage.md),
@@ -67,5 +67,8 @@ durable, and make every write idempotent (`event_id`, `change_id`, notification 
 | `VITE_API_URL` (or the frontend stack's equivalent) | frontend | `http://localhost:8000` |
 | `ANTHROPIC_API_KEY` | ai-worker only | optional: without it the system runs on seeded mappings and new schemas stay unmapped |
 | `ANTHROPIC_MODEL` | ai-worker only | optional, default `claude-opus-5-5` |
+| `TYPESAFE_API_KEY` | ai-worker only | optional: without it the ai-worker makes no `rule_severity` or `runbook_start` proposal and posts no run risk check (it does not poll `GET /runs`; those jobs stay pending) |
+| `TYPESAFE_BASE_URL` | ai-worker only | optional, default `https://api.typesafe.ai` (a local stand-in for tests) |
+| `TYPESAFE_MODEL` | ai-worker only | optional, default `jev-latest` |
 
 No auth in the PoC. The UI has a user picker and sends the chosen user as the `X-User` header.

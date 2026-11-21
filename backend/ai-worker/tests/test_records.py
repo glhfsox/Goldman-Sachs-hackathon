@@ -14,19 +14,22 @@ def test_schema_sample_becomes_mapping_job():
 
 def test_runbook_draft_becomes_job_and_others_do_not():
     rec = {"kind": "runbook", "id": "rb-1", "updated_at": "2026-11-20T09:30:00.000Z", "deleted": False, "body": RUNBOOK}
-    assert config_job(rec, {}) == ("runbook:rb-1:2", "runbook", RUNBOOK)
-    assert config_job({**rec, "body": {**RUNBOOK, "canonical": {"steps": []}}}, {}) is None
-    assert config_job({**rec, "body": {**RUNBOOK, "status": "active"}}, {}) is None
+    assert config_job(rec, {}, {}) == ("runbook:rb-1:2", "runbook", RUNBOOK)
+    assert config_job({**rec, "body": {**RUNBOOK, "canonical": {"steps": []}}}, {}, {}) is None
+    assert config_job({**rec, "body": {**RUNBOOK, "status": "active"}}, {}, {}) is None
 
 
 def test_mapping_records_keep_the_copy_current():
-    mappings = {}
+    mappings, rules = {}, {}
     body = {"id": "m1", "status": "active"}
-    assert config_job({"kind": "mapping", "id": "m1", "deleted": False, "body": body}, mappings) is None
+    assert config_job({"kind": "mapping", "id": "m1", "deleted": False, "body": body}, mappings, rules) is None
     assert mappings == {"m1": body}
-    config_job({"kind": "mapping", "id": "m1", "deleted": True, "body": None}, mappings)
+    config_job({"kind": "mapping", "id": "m1", "deleted": True, "body": None}, mappings, rules)
     assert mappings == {}
-    assert config_job({"kind": "rule", "id": "r1", "deleted": False, "body": {"id": "r1"}}, mappings) is None
+    assert config_job({"kind": "rule", "id": "r1", "deleted": False, "body": {"id": "r1"}}, mappings, rules) is None
+    assert rules == {"r1": {"id": "r1"}} and mappings == {}
+    config_job({"kind": "rule", "id": "r1", "deleted": True, "body": None}, mappings, rules)
+    assert rules == {}
 
 
 def test_only_resolved_alert_changes_become_proposal_jobs():

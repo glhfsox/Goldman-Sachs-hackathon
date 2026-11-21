@@ -20,8 +20,8 @@ class Api:
     def __init__(self, base: str | None = None):
         self.base = (base or os.environ["API_URL"]).rstrip("/")
 
-    def get(self, path: str):
-        return self._call("GET", path, None)
+    def get(self, path: str, timeout: float = TIMEOUT_S):
+        return self._call("GET", path, None, timeout)
 
     def put(self, path: str, body):
         return self._call("PUT", path, body)
@@ -29,13 +29,13 @@ class Api:
     def post(self, path: str, body):
         return self._call("POST", path, body)
 
-    def _call(self, method: str, path: str, body):
+    def _call(self, method: str, path: str, body, timeout: float = TIMEOUT_S):
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(self.base + path, data=data, method=method,
                                      headers={"X-User": "ai-worker", "Content-Type": "application/json",
                                               "Accept": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read()
         except urllib.error.HTTPError as e:
             if not 400 <= e.code < 500:

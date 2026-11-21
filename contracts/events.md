@@ -111,8 +111,11 @@ same transaction ([storage.md](storage.md)), then Kafka, then Redis `ui.alerts`.
 Consumers: the notifier (policy and delivery; on `acked` it cancels every notification of that alert
 that is still pending), the api (its read copy of alerts and the timeline) and the processor, which owns
 alert state and applies the `acked` and `resolved` records the api published. Every consumer ignores
-changes it published itself and applies the rest idempotently by `change_id`. The ai-worker reads only
-`resolved` records, to draft a runbook from what people did on that alert ([runbooks.md](runbooks.md)).
+changes it published itself and applies the rest idempotently by `change_id`. The ai-worker reads every
+record into its own `alert_history` ([schemas/ai-worker.md](schemas/ai-worker.md)), to propose a rule's
+severity from how people reacted to its alerts ([api.md](api.md), proposal `rule_severity`), and uses
+`resolved` records to draft a runbook from what people did on that alert ([runbooks.md](runbooks.md)).
+From an `acked` or `resolved` record it needs only `change`, `at`, `actor` and `alert.id`.
 
 ### What the notifier gets from the processor
 
@@ -177,7 +180,7 @@ the row they hold.
 |---|---|---|---|
 | `source` | source id | `{id, kind, config, enabled}` | ingest |
 | `mapping` | mapping id | Mapping ([rules.md](rules.md) §3) | processor; ai-worker (in memory, to check a new mapping against the existing ones) |
-| `rule` | rule id | Rule ([rules.md](rules.md) §4) | processor, notifier |
+| `rule` | rule id | Rule ([rules.md](rules.md) §4) | processor, notifier; ai-worker (in memory, for the severity judge) |
 | `service_dep` | `<service>:<depends_on>` | `{service, depends_on}` | processor |
 | `team` | team id | `{id, name}` | notifier |
 | `user` | user id | `{id, name, email, phone}` | notifier |

@@ -17,11 +17,12 @@ def enqueue(conn, job_id: str, kind: str, input: dict) -> bool:
     return cur.rowcount == 1
 
 
-def claim(conn) -> dict | None:
-    """Lock one pending job and return it, leaving the transaction open until `finish`; None when there is none."""
+def claim(conn, kinds: list[str]) -> dict | None:
+    """Lock one pending job of one of `kinds` and return it, leaving the transaction open until `finish`; None when
+    there is none. `run_risk` jobs go first: they are useless after the run's `start_at`."""
     row = conn.cursor(row_factory=dict_row).execute(
-        "SELECT id, kind, input, attempts FROM jobs WHERE status = 'pending'"
-        " ORDER BY attempts, created_at LIMIT 1 FOR UPDATE SKIP LOCKED").fetchone()
+        "SELECT id, kind, input, attempts FROM jobs WHERE status = 'pending' AND kind = ANY(%s)"
+        " ORDER BY kind <> 'run_risk', attempts, created_at LIMIT 1 FOR UPDATE SKIP LOCKED", (kinds,)).fetchone()
     if row is None:
         conn.rollback()
     return row

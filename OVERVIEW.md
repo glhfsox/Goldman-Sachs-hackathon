@@ -171,6 +171,7 @@ flowchart TB
   n_sources(["<b>sources</b><br/><small>external</small>"])
   n_channels(["<b>channels</b><br/><small>external</small>"])
   n_claude_api(["<b>claude_api</b><br/><small>external</small>"])
+  n_typesafe_api(["<b>typesafe_api</b><br/><small>external</small>"])
   subgraph a_infra ["infra"]
     n_source_kafka("<b>source_kafka</b><br/><small>topic</small>")
     n_events_raw("<b>events_raw</b><br/><small>topic</small>")
@@ -213,9 +214,9 @@ flowchart TB
   n_config_changes -- "sources" --> n_ingest
   n_config_changes -- "mappings, rules, service map" --> n_processor
   n_config_changes -- "rules, teams, on-call, preferences, runbooks" --> n_notifier
-  n_config_changes -- "runbook drafts, mappings" --> n_ai_worker
-  n_alerts_changes -- "resolved" --> n_ai_worker
-  n_api -- "alert timeline (REST)" --> n_ai_worker
+  n_config_changes -- "runbook drafts, mappings, rules" --> n_ai_worker
+  n_alerts_changes -- "alert change" --> n_ai_worker
+  n_api -- "alert timeline, runs to risk-check, finished runs (REST)" --> n_ai_worker
   n_notifier -- "notifications, config and alert copies" --> n_notifier_db
   n_notifier -- "rendered message" --> n_channels
   n_notifier -- "notification status" --> n_alerts_timeline
@@ -226,11 +227,12 @@ flowchart TB
   n_api -- "config, timeline, action runs, alert copy" --> n_api_db
   n_api -- "REST, WebSocket" --> n_web_ui
   n_web_ui -- "user actions" --> n_api
-  n_ai_worker -- "jobs" --> n_ai_worker_db
-  n_ai_worker -- "mappings, canonical runbooks, proposals (REST)" --> n_api
+  n_ai_worker -- "jobs, alert history, run history" --> n_ai_worker_db
+  n_ai_worker -- "mappings, canonical runbooks, proposals, run risk checks (REST)" --> n_api
   n_ai_worker -- "sample payload, runbook text, alert timeline" --> n_claude_api
+  n_ai_worker -- "rule, alert summary, reaction and run stats, run actions with filled params" --> n_typesafe_api
   classDef k0 fill:#dbeafe,stroke:#2563eb,color:#111827
-  class n_sources,n_channels,n_claude_api k0
+  class n_sources,n_channels,n_claude_api,n_typesafe_api k0
   classDef k1 fill:#dcfce7,stroke:#16a34a,color:#111827
   class n_source_kafka,n_events_raw,n_alerts_changes,n_config_changes,n_alerts_timeline,n_schema_samples k1
   classDef k2 fill:#fef3c7,stroke:#d97706,color:#111827
@@ -256,7 +258,7 @@ Every service is stateless; all state sits in Kafka, Redis or the service's own 
 | Processor (`backend/processor`) | Applies the stored schema mapping, or marks the event unmapped. Evaluates rules. Deduplicates and groups per rule. Links related alerts into incidents. Owns alert state: writes it, publishes state changes to `alerts.changes`, applies acks and resolves from the API, and auto-resolves an alert when nothing recurs for the rule's window. | Alerts, incidents and an outbox, plus its copies of mappings, rules and the service map compiled into memory (`processor` database); counters (Redis) | Kafka partitions of `events.raw` |
 | Notifier (`backend/notifier`) | Policy: who is told, when, on which channel, in one message or a digest. Writes notification rows with a send time. Workers send through channel adapters with retry, backoff and a fallback channel. A scheduler loop runs escalation steps and digests. Reports every delivery on `alerts.timeline`. | Notification outbox, plus its copies of rules, teams, on-call, preferences, runbooks and alert state (`notifier` database) | Workers claiming rows with `SKIP LOCKED` |
 | API (`backend/api`) | REST and WebSocket for the UI: live feed, ack and resolve, rules, mappings, preferences, runbooks, approvals, improvement proposals. Hosts the runbook module: lookup, placeholder fill, and the action runner with its approval gate. | Owns all configuration (published on `config.changes`), runbooks, the timeline, action runs and proposals; keeps a read copy of alerts and deliveries (`api` database); pushes via Redis pub/sub | Replicas; any replica can push to any browser |
-| AI worker (`backend/ai-worker`) | Off the event path. An LLM agent with three tools, each checked by code before anything is saved: it writes the mapping for a new schema, converts an uploaded runbook to the canonical form, and proposes a runbook from the timeline of a resolved alert. Sends its results to the API over REST. | Its job queue (`ai_worker` database) | One or two workers with a concurrency cap |
+| AI worker (`backend/ai-worker`) | Off the event path. An LLM agent with three tools, each checked by code before anything is saved: it writes the mapping for a new schema, converts an uploaded runbook to the canonical form, and proposes a runbook from the timeline of a resolved alert. A severity judge (TypeSafe Jev, one call per job) proposes the severity a rule should fix from how people reacted to its alerts. Sends its results to the API over REST. | Its job queue and alert history (`ai_worker` database) | One or two workers with a concurrency cap |
 
 Shared infrastructure: one internal Kafka cluster used by all backend services, with five topics
 (`events.raw` and `alerts.changes` on the event path; `config.changes`, `alerts.timeline` and `schema.samples`
@@ -272,7 +274,7 @@ runbook actions call.
 | Processor | `processor` | Alerts, incidents, its outbox, the schemas already reported, parked unmapped events | Mappings, rules, service map (`config.changes`) |
 | Notifier | `notifier` | Notifications (delivery outbox) | Alerts (`alerts.changes`); rules, teams, users, on-call, preferences, runbooks (`config.changes`) |
 | API | `api` | Sources, mappings, rules, teams, users, on-call, preferences, service map, runbooks, timeline, action runs, proposals | Alerts (`alerts.changes`), deliveries (`alerts.timeline`), schema samples (`schema.samples`) |
-| AI worker | `ai_worker` | Its job queue | nothing |
+| AI worker | `ai_worker` | Its job queue, its alert history | nothing |
 
 - A table has one owner, and only that service connects to the database it lives in.
 - Data crosses services only as Kafka records on the shared cluster, or through the API's REST endpoints
