@@ -18,6 +18,7 @@ public sealed record RunResponse(
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
     string? CancelledBy,
+    RiskCheckResponse? RiskCheck,
     IReadOnlyList<RunNodeResponse> Nodes)
 {
     public static RunResponse From(RunbookRun run, IReadOnlyList<ActionRun> nodes)
@@ -41,6 +42,7 @@ public sealed record RunResponse(
             run.StartedAt,
             run.FinishedAt,
             run.CancelledBy,
+            RiskCheckResponse.From(run),
             nodes.Select(RunNodeResponse.From).ToList());
     }
 }

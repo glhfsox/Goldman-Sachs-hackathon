@@ -40,6 +40,20 @@ public sealed class RunRepository : IRunRepository
         WHERE id = (
             SELECT id FROM runbook_runs
             WHERE status = 'scheduled' AND start_at <= {0}
+              AND ({1} = false OR risk <> 'auto' OR risk_check_verdict = 'clear')
+            ORDER BY start_at
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED)
+        RETURNING *
+        """;
+
+    private const string HoldUnansweredSql = """
+        UPDATE runbook_runs
+        SET status = 'waiting_approval', risk_check_verdict = 'hold', risk_check_reasons = {1},
+            risk_check_by = {2}, risk_check_at = {0}
+        WHERE id = (
+            SELECT id FROM runbook_runs
+            WHERE status = 'scheduled' AND start_at <= {0} AND risk = 'auto' AND risk_check_verdict IS NULL
             ORDER BY start_at
             LIMIT 1
             FOR UPDATE SKIP LOCKED)
@@ -73,24 +87,65 @@ public sealed class RunRepository : IRunRepository
     public async Task<bool> HasLiveRunAsync(string alertId, CancellationToken cancellationToken = default)
     {
         return await _context.Runs.AnyAsync(
-            run => run.AlertId == alertId && (run.Status == RunbookRun.Scheduled || run.Status == RunbookRun.Running),
+            run => run.AlertId == alertId && (run.Status == RunbookRun.Scheduled || run.Status == RunbookRun.WaitingApproval || run.Status == RunbookRun.Running),
             cancellationToken);
     }
 
     public async Task<RunbookRun?> GetLiveByAlertIdAsync(string alertId, CancellationToken cancellationToken = default)
     {
         return await _context.Runs.FirstOrDefaultAsync(
-            run => run.AlertId == alertId && (run.Status == RunbookRun.Scheduled || run.Status == RunbookRun.Running),
+            run => run.AlertId == alertId && (run.Status == RunbookRun.Scheduled || run.Status == RunbookRun.WaitingApproval || run.Status == RunbookRun.Running),
             cancellationToken);
     }
 
-    public async Task<RunbookRun?> ClaimDueScheduledAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    public async Task<RunbookRun?> ClaimDueScheduledAsync(DateTimeOffset now, bool requireClear, CancellationToken cancellationToken = default)
     {
         var claimed = await _context.Runs
-            .FromSqlRaw(ClaimDueScheduledSql, now)
+            .FromSqlRaw(ClaimDueScheduledSql, now, requireClear)
             .ToListAsync(cancellationToken);
 
         return claimed.FirstOrDefault();
+    }
+
+    public async Task<RunbookRun?> HoldUnansweredAsync(DateTimeOffset now, string by, string reasonsJson, CancellationToken cancellationToken = default)
+    {
+        var held = await _context.Runs
+            .FromSqlRaw(HoldUnansweredSql, now, reasonsJson, by)
+            .ToListAsync(cancellationToken);
+
+        return held.FirstOrDefault();
+    }
+
+    public async Task<IReadOnlyList<RunbookRun>> ListPendingRiskCheckAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        return await _context.Runs
+            .AsNoTracking()
+            .Where(run => run.Status == RunbookRun.Scheduled && run.Risk == "auto" && run.RiskCheckVerdict == null)
+            .OrderBy(run => run.StartAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RunbookRun>> ListFinishedSinceAsync(DateTimeOffset since, int limit, CancellationToken cancellationToken = default)
+    {
+        return await _context.Runs
+            .AsNoTracking()
+            .Where(run => (run.Status == RunbookRun.Done || run.Status == RunbookRun.Failed || run.Status == RunbookRun.Cancelled)
+                && run.FinishedAt >= since)
+            .OrderBy(run => run.FinishedAt)
+            .ThenBy(run => run.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ActionRun>> GetNodesForRunsAsync(IReadOnlyCollection<string> runIds, CancellationToken cancellationToken = default)
+    {
+        return await _context.ActionRuns
+            .AsNoTracking()
+            .Where(node => runIds.Contains(node.RunId))
+            .OrderBy(node => node.RunId)
+            .ThenBy(node => node.StepIndex)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<ActionRun>> GetNodesAsync(string runId, CancellationToken cancellationToken = default)

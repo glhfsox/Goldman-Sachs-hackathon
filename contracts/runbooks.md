@@ -101,7 +101,7 @@ run's risk:
 | `auto` | Only when a person accepted this version and `runbook_starts` has `auto` for the rule and runbook: the run is `scheduled` with `start_at` = now + `RUNBOOK_CANCEL_WINDOW_S` (30 s). The executor loops start it when `start_at` passes. |
 | `approval` | Nothing starts; a person starts it. |
 
-Interim, until the risk check (#75, step 5): a `scheduled` run starts at `start_at` without a verdict. A broken or unknown runbook is logged and skipped,
+With `RUNBOOK_RISK_CHECK=true` (default) an `auto`-risk run starts at `start_at` only when the ai-worker's risk check cleared it; a `hold` or no verdict at `start_at` makes it `waiting_approval` until a person approves ([api.md](api.md) "Runbook runs"). With `false` it starts at `start_at` unchecked. A broken or unknown runbook is logged and skipped,
 never an error for the Kafka record. One run per `opened` record (`trigger_change_id` is unique) and one live run per alert. A `resolved`
 alert, by a person (`POST /alerts/{id}/resolve`) or by the processor, cancels the alert's live run.
 

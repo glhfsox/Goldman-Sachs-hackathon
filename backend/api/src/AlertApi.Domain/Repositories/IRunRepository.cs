@@ -14,7 +14,19 @@ public interface IRunRepository
     Task<RunbookRun?> GetLiveByAlertIdAsync(string alertId, CancellationToken cancellationToken = default);
 
     // Starts the oldest scheduled run whose start time has passed; replicas never get the same run.
-    Task<RunbookRun?> ClaimDueScheduledAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
+    // With `requireClear`, an `auto` run is only taken when the risk check cleared it.
+    Task<RunbookRun?> ClaimDueScheduledAsync(DateTimeOffset now, bool requireClear, CancellationToken cancellationToken = default);
+
+    // Holds the oldest `auto` run whose start time passed with no verdict (it becomes waiting_approval); replicas never get the same run.
+    Task<RunbookRun?> HoldUnansweredAsync(DateTimeOffset now, string by, string reasonsJson, CancellationToken cancellationToken = default);
+
+    // Scheduled `auto` runs without a verdict, oldest start first.
+    Task<IReadOnlyList<RunbookRun>> ListPendingRiskCheckAsync(int limit, CancellationToken cancellationToken = default);
+
+    // Done, failed or cancelled runs finished at or after `since`, oldest first.
+    Task<IReadOnlyList<RunbookRun>> ListFinishedSinceAsync(DateTimeOffset since, int limit, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ActionRun>> GetNodesForRunsAsync(IReadOnlyCollection<string> runIds, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ActionRun>> GetNodesAsync(string runId, CancellationToken cancellationToken = default);
 

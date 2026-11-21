@@ -88,7 +88,11 @@ One run of a runbook on an alert (migration `AddRunbookRuns`). Indexed on `(stat
 | `runbook_version` | int, not null | The accepted version that was run |
 | `risk` | text, not null | `read_only`, `auto` or `approval`: the highest risk of any step, including steps an `if` may skip |
 | `trigger` | text, not null | `manual` (a person started it) or `auto` (started by `opened` / `reopened`, migration `AddAutoRunStart`) |
-| `status` | text, not null | `scheduled`, `running`, `done`, `failed`, `cancelled`. Unique index `UQ_runbook_runs_live_alert` on `alert_id` where status is `scheduled` or `running`: one live run per alert |
+| `status` | text, not null | `scheduled`, `waiting_approval` (held for a person, migration `AddRunRiskCheck`), `running`, `done`, `failed`, `cancelled`. Unique index `UQ_runbook_runs_live_alert` on `alert_id` where status is `scheduled`, `waiting_approval` or `running`: one live run per alert |
+| `risk_check_verdict` | text | `clear` or `hold`; null until the ai-worker (or, with no answer by `start_at`, the scheduler) sets it. Index `IX_runbook_runs_risk_check_pending` for `scheduled` rows without one |
+| `risk_check_confidence` | double | 0 to 1; null for the scheduler's hold |
+| `risk_check_reasons` | text | JSON array of at most 6 sentences |
+| `risk_check_by`, `risk_check_at` | text, timestamptz | `ai-worker`, or `runbook-scheduler` for the no-answer hold |
 | `start_at` | timestamptz, not null | When the run starts; now for a manual run or a `read_only` auto run, now + cancel window for an `auto`-risk run |
 | `approved_by`, `approved_at` | text, timestamptz | The person who started it by hand |
 | `created_at` | timestamptz, not null | |
