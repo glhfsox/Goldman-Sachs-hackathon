@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+using AlertApi.Application.Interfaces;
+using AlertApi.Infrastructure.Redis;
 
 using AlertApi.Infrastructure.Kafka;
 
@@ -11,7 +15,12 @@ namespace AlertApi.Tests.Api;
 public static class ApiFactory
 {
     // Every factory gets its own database, so tests never see each other's rows.
-    public static WebApplicationFactory<Program> Create(PostgresFixture postgres, string environment, bool enableSwagger)
+    // Without a redisUrl the live updates go to a recording fake and nothing subscribes to Redis.
+    public static WebApplicationFactory<Program> Create(
+        PostgresFixture postgres,
+        string environment,
+        bool enableSwagger,
+        string? redisUrl = null)
     {
         var database = $"api_{Guid.NewGuid():N}";
         var builder = new Npgsql.NpgsqlConnectionStringBuilder(postgres.ConnectionString);
@@ -30,12 +39,21 @@ public static class ApiFactory
             host.UseSetting("DATABASE_URL", $"postgres://{builder.Username}:{builder.Password}@{builder.Host}:{builder.Port}/{database}");
             // The producer connects lazily; queued outbox rows stay in the table and the publisher logs and retries.
             host.UseSetting("KAFKA_BROKERS", "localhost:1");
+            host.UseSetting("REDIS_URL", redisUrl ?? "redis://localhost:1/0");
             host.UseSetting("ENABLE_SWAGGER", enableSwagger ? "true" : "false");
             // Tests feed records to the handler directly; no consumer should poll a broker that does not exist.
             host.ConfigureServices(services =>
             {
                 var consumer = services.Single(descriptor => descriptor.ImplementationType == typeof(ActivityConsumer));
                 services.Remove(consumer);
+
+                if (redisUrl is null)
+                {
+                    services.Remove(services.Single(descriptor => descriptor.ImplementationType == typeof(UiAlertsSubscriber)));
+                    services.RemoveAll<IUiPublisher>();
+                    services.AddSingleton<RecordingUiPublisher>();
+                    services.AddSingleton<IUiPublisher>(provider => provider.GetRequiredService<RecordingUiPublisher>());
+                }
             });
         });
     }

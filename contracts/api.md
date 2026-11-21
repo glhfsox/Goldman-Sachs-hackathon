@@ -99,7 +99,7 @@ Example invalid rule:
 `ws://localhost:8000/ws?team=<team id>` (omit `team` for all teams). Server to client only; the three
 message shapes are exactly the Redis `ui.alerts` messages in [events.md](events.md):
 `alert` (insert or replace the card), `count` (update the counter), `timeline` (refetch `GET /alerts/{id}`
-if that alert is open on screen). On reconnect the UI refetches `GET /alerts`.
+if that alert is open on screen). On reconnect the UI refetches `GET /alerts`. With `team`, a message is sent only when its alert is that team's; a message for an alert the api has not stored yet is not sent to such a client. A person's ack or resolve is sent as an `alert` message by the api itself, since the processor does not publish it.
 
 ## Short link
 

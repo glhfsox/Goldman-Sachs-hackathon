@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using AlertApi.Application.DTOs.Messages;
+using AlertApi.Application.DTOs.Responses;
 using AlertApi.Application.Interfaces;
 using AlertApi.Application.Serialization;
 using AlertApi.Domain.Models;
@@ -18,13 +19,16 @@ public sealed class ActivityService : IActivityService
     private readonly IAlertEventRepository _events;
     private readonly INotificationRepository _notifications;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IUiPublisher _ui;
 
     public ActivityService(
         IAlertRepository alerts,
         IAlertEventRepository events,
         INotificationRepository notifications,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IUiPublisher ui)
     {
+        _ui = ui;
         _alerts = alerts;
         _events = events;
         _notifications = notifications;
@@ -34,6 +38,8 @@ public sealed class ActivityService : IActivityService
     public async Task ApplyAlertChangeAsync(AlertChangeMessage message, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
+
+        var addedTimelineRow = false;
 
         if (message.Change != CountThreshold)
         {
@@ -49,6 +55,7 @@ public sealed class ActivityService : IActivityService
             await _events.AddAsync(
                 AlertEvent.Create(message.ChangeId, message.Alert.Id, message.At, message.Actor, message.Change, data),
                 cancellationToken);
+            addedTimelineRow = true;
         }
 
         var snapshot = ToSnapshot(message.Alert);
@@ -63,6 +70,32 @@ public sealed class ActivityService : IActivityService
             alert.ReplaceWith(snapshot);
         }
 
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        if (addedTimelineRow)
+        {
+            await _ui.PublishTimelineAsync(message.Alert.Id, cancellationToken);
+        }
+
+        // The processor publishes its own changes to Redis; a person's ack or resolve is published here.
+        if (IsPersonChange(message))
+        {
+            await _ui.PublishAlertAsync(message.Change, AlertResponse.From(snapshot), cancellationToken);
+        }
+    }
+
+    public async Task ApplyCountAsync(CountMessage message, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        var alert = await _alerts.GetByIdAsync(message.AlertId, cancellationToken);
+
+        if (alert is null)
+        {
+            return;
+        }
+
+        alert.ApplyCount(message.Count, message.LastSeen);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
@@ -111,6 +144,12 @@ public sealed class ActivityService : IActivityService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _ui.PublishTimelineAsync(message.AlertId, cancellationToken);
+    }
+
+    private static bool IsPersonChange(AlertChangeMessage message)
+    {
+        return message.Change is "acked" or "resolved" && message.Actor is not ("processor" or "auto");
     }
 
     private static AlertSnapshot ToSnapshot(AlertMessage alert)

@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 using AlertApi.Application.Constants;
+using AlertApi.Application.DTOs.Messages;
 using AlertApi.Application.Exceptions;
 using AlertApi.Application.Interfaces;
 using AlertApi.Infrastructure.Data;
@@ -201,6 +202,44 @@ public sealed class ActivityTests : IClassFixture<PostgresFixture>
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(0, mappings.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Changes_PublishATimelineMessage_AndOnlyAPersonsAckOrResolveAnAlertMessage()
+    {
+        using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
+        var ui = factory.Services.GetRequiredService<RecordingUiPublisher>();
+
+        await Handle(factory, Topics.AlertsChanges, ActivityRecords.AlertChange("c-1", "opened"));
+        await Handle(factory, Topics.AlertsChanges, ActivityRecords.AlertChange("c-2", "count_threshold", count: 10));
+        await Handle(factory, Topics.AlertsChanges, ActivityRecords.AlertChange("c-3", "resolved", status: "resolved").Replace("\"processor\"", "\"auto\""));
+        await Handle(factory, Topics.AlertsChanges, ActivityRecords.AlertChange("c-4", "acked", status: "acked", ackedBy: "anna").Replace("\"processor\"", "\"anna\""));
+        await Handle(factory, Topics.AlertsChanges, ActivityRecords.AlertChange("c-4", "acked", status: "acked", ackedBy: "anna").Replace("\"processor\"", "\"anna\""));
+        await Handle(factory, Topics.AlertsTimeline, ActivityRecords.Timeline("e-1"));
+
+        Assert.Equal(["alert-1", "alert-1", "alert-1", "alert-1"], ui.Timelines);
+        var person = Assert.Single(ui.Alerts);
+        Assert.Equal("acked", person.Change);
+        Assert.Equal("anna", person.Alert.AckedBy);
+    }
+
+    [Fact]
+    public async Task Count_OnlyRaisesTheCounter_AndIgnoresAnUnknownAlert()
+    {
+        using var factory = ApiFactory.Create(_postgres, "Production", enableSwagger: false);
+        using var client = factory.CreateClient();
+        await Handle(factory, Topics.AlertsChanges, ActivityRecords.AlertChange("c-1", "opened"));
+        await using var scope = factory.Services.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<IActivityService>();
+        var later = DateTimeOffset.Parse("2026-11-20T10:16:00Z");
+
+        await service.ApplyCountAsync(new CountMessage("alert-1", 500, later));
+        await service.ApplyCountAsync(new CountMessage("alert-1", 20, later.AddMinutes(-5)));
+        await service.ApplyCountAsync(new CountMessage("nope", 5, later));
+        var detail = await client.GetFromJsonAsync<JsonElement>("/api/alerts/alert-1");
+
+        Assert.Equal(500, detail.GetProperty("alert").GetProperty("count").GetInt64());
+        Assert.Equal("2026-11-20T10:16:00.000Z", detail.GetProperty("alert").GetProperty("last_seen").GetString());
     }
 
     private static async Task Handle(WebApplicationFactory<Program> factory, string topic, string value)
