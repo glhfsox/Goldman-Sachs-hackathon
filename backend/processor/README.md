@@ -61,8 +61,11 @@ the rest are not parked, so the alert's count starts from those 1,000.
 ## Measured (21-11, one Mac, Docker Desktop, mock data from `load.py`)
 
 Published flat out unless a rate is given. `load.py` introduces new alert keys at a constant rate over the
-whole run, so the latency is that of steady state, not of a burst of new alerts at the start. Only 3 of the 6
-`events.raw` partitions get traffic, because events are keyed by source and the samples have 3 sources.
+whole run, so the latency is that of steady state, not of a burst of new alerts at the start. The table was
+measured when `load.py` keyed events by source, so only 3 of the 6 `events.raw` partitions got traffic; it now
+keys them by `event_id`, as ingest does, so all 6 do and the events of one alert reach every worker.
+Measured again that way, with the atomic Redis batch (100,000 events, 90% duplicates, flat out, backlog):
+3 workers 31,913 events/s, 6 workers 36,310 events/s, and the alert counters add up to the events sent.
 
 | Workers | Events | Duplicates | Rate | Processed events/s | Ingest → alert visible, p50 / p99 |
 |---|---|---|---|---|---|

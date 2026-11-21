@@ -168,9 +168,10 @@ class Store:
         self._sha = {name: self.r.script_load(src) for name, src in (("hit", _HIT), ("seed", _SEED), ("undirty", _UNDIRTY), ("drop", _DROP))}
 
     def _exec(self, fill) -> list:
-        """One pipeline round trip; reloads the scripts once if Redis lost them (every call here is idempotent)."""
+        """One MULTI/EXEC round trip; reloads the scripts once if Redis lost them (every call here is idempotent)."""
         for retry in (False, True):
-            pipe = self.r.pipeline(transaction=False)
+            # atomic: another replica's seed between two hits of one key in this batch would drop the earlier miss as a duplicate
+            pipe = self.r.pipeline(transaction=True)
             fill(pipe)
             try:
                 return pipe.execute()
@@ -220,7 +221,9 @@ class Store:
         """Miss path for items with distinct alert keys: find, reopen or insert each alert, all in one transaction with
         a fixed number of round trips. Returns, in item order, the row and whether that event is already in its count."""
         keys = [it.match.alert_key for it in items]
-        for _ in range(3):
+        # a unique violation means another replica committed one of these keys, which the next round finds live:
+        # at most one such round per key; the 3 spare rounds are for deadlocks
+        for _ in range(len(keys) + 3):
             try:
                 with self.pg.transaction(), self.pg.cursor(row_factory=dict_row) as cur:
                     cur.execute("SELECT * FROM alerts WHERE alert_key = ANY(%s) AND status <> 'resolved'", (keys,))
