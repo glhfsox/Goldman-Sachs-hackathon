@@ -1,0 +1,17 @@
+# Applied to backend/ai-worker/docker-compose.yml by the root docker-compose.yml only.
+# The stub api is not started (profile `stub`); the ai-worker calls the real api instead.
+services:
+  stub-api:
+    profiles: ["stub"]
+    ports: !reset []
+
+  ai-worker:
+    environment:
+      API_URL: http://api:8000/api
+    depends_on: !override
+      kafka-init:
+        condition: service_completed_successfully
+      ai-worker-db:
+        condition: service_healthy
+      api:
+        condition: service_started
