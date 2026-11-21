@@ -125,6 +125,7 @@ public sealed class IngestEndpointTests : IClassFixture<PostgresFixture>, IClass
         {
             builder.UseSetting("DATABASE_URL", _postgres.DatabaseUrl);
             builder.UseSetting("KAFKA_BROKERS", brokers);
+            builder.UseSetting("SOURCE_KAFKA_BROKERS", _kafka.Brokers);
         });
     }
 

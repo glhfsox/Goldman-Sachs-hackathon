@@ -1,10 +1,8 @@
-using System.Text;
-using System.Text.Json;
-
 using Ingest.Application.DTOs.Responses;
 using Ingest.Application.Exceptions;
 using Ingest.Application.Interfaces;
 using Ingest.Domain.Models;
+using Ingest.Domain.Services;
 using Ingest.Domain.ValueObjects;
 
 namespace Ingest.Application.Services;
@@ -44,7 +42,7 @@ public sealed class IngestService : IIngestService
             Guid.CreateVersion7(),
             sourceId,
             _timeProvider.GetUtcNow(),
-            ParsePayload(body.Span));
+            PayloadParser.Parse(body.Span));
 
         await _publisher.PublishAsync(rawEvent, cancellationToken);
 
@@ -59,24 +57,6 @@ public sealed class IngestService : IIngestService
         if (source is null || !source.Enabled || source.Kind != SourceKind.Http)
         {
             throw new SourceNotFoundException(sourceId);
-        }
-    }
-
-    // Valid JSON stays JSON; anything else (a log line, broken JSON) becomes a string.
-    // Invalid UTF-8 bytes become U+FFFD so that one bad byte never loses the event.
-    private static JsonElement ParsePayload(ReadOnlySpan<byte> body)
-    {
-        var text = Encoding.UTF8.GetString(body);
-
-        try
-        {
-            using var document = JsonDocument.Parse(text);
-
-            return document.RootElement.Clone();
-        }
-        catch (JsonException)
-        {
-            return JsonSerializer.SerializeToElement(text);
         }
     }
 }
