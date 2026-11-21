@@ -1,0 +1,58 @@
+{
+  "config": {
+    "rate": 9000,
+    "duration_s": 120,
+    "probes": 100,
+    "started": "20261121071509",
+    "machine": "one machine (Darwin arm64, Docker); all services share the host clock, so cross-service latencies are comparable"
+  },
+  "throughput": {
+    "window_s": 139.6,
+    "ingested_per_s": 6426.3,
+    "processed_per_s": 6426.3,
+    "peak_ingested_per_s": 33865.6,
+    "peak_processed_per_s": 32200.2,
+    "lag_at_load_end": 0,
+    "drain_s": 0.7,
+    "simulator": {
+      "sent": 897276,
+      "failed": 0,
+      "processes": 3,
+      "summary": "done in 138.3 s: generated 325504, sent 325504, failed 0, retries 0, 2354 msg/s | done in 127.3 s: generated 290267, sent 290267, failed 0, retries 0, 2280 msg/s | done in 127.0 s: generated 281505, sent 281505, failed 0, retries 0, 2217 msg/s"
+    }
+  },
+  "latency_ms": {
+    "ingest_to_ui": {
+      "count": 100,
+      "p50": 94.00010108947754,
+      "p95": 217.00000762939453,
+      "p99": 249.00007247924805,
+      "max": 594.0001010894775
+    },
+    "ingest_to_email": {
+      "count": 100,
+      "p50": 98.9999771118164,
+      "p95": 236.00006103515625,
+      "p99": 292.9999828338623,
+      "max": 887.0000839233398
+    },
+    "ingest_to_sms": {
+      "count": 100,
+      "p50": 100.99983215332031,
+      "p95": 230.00001907348633,
+      "p99": 256.9999694824219,
+      "max": 679.0001392364502
+    }
+  },
+  "probes": {
+    "sent": 100,
+    "lost": 0,
+    "channel_not_sent": {}
+  },
+  "dedup": {
+    "background_events": 897276,
+    "background_alerts_opened": 0,
+    "duplicate_ratio": 1.0
+  },
+  "jev": {}
+}
