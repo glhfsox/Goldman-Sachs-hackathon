@@ -68,7 +68,10 @@ The record key is `source_id`.
 - Severity scale, low to high: `info`, `warning`, `error`, `critical`.
 - An event with no matching mapping still gets an envelope: `mapped: false`, `type: "unmapped"`,
   `severity: "warning"`, `env: "unknown"`, `service` = `source`, `ts` = `received_at`, `dedup_hints: []`.
-  Rules can still match it through `raw.*`, and the UI shows it as unmapped.
+  Rules can still match it through `raw.*`, and the UI shows it as unmapped. The processor also parks
+  the event (up to 1,000 per schema, for 1 hour) and, when a mapping that fits becomes active, runs it
+  again as a mapped event through every rule that did not already match it. A replayed event keeps its
+  original `received_at`.
 - The envelope is not a Kafka record. It is stored on the alert as `sample_event` and is what rule
   conditions, templates and runbook placeholders read (path rules in [rules.md](rules.md)).
 - Rules and templates always see the whole payload. The copy stored on the alert is capped so that no
@@ -207,7 +210,8 @@ not repeated here: the api derives those timeline rows from `alerts.changes`.
 
 ## 8. New schemas: topic `schema.samples`
 
-Published by the processor once per fingerprint, when an event matches no mapping.
+Published by the processor once per fingerprint, when an event matches no mapping. The events of
+that schema wait in the processor until a mapping arrives (§3).
 
 ```json
 {

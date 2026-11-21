@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from conftest import EXAMPLE_RULES, PAYLOADS, SEED_MAPPINGS, make_event
-from processor import compile_rules
+from processor import compile_mappings, compile_rules
 from processor.config import Config
 from processor.main import Processor
 from processor.relay import Relay
@@ -45,6 +45,7 @@ class FakeConsumer:
 class FakeConfig:
     def __init__(self, mappings, rules, calls):
         self.mappings, self.rules, self.calls, self.applied = mappings, rules, calls, []
+        self.changed = False  # what the next refresh returns
 
     def apply(self, records):
         self.calls.append("config.apply")
@@ -52,7 +53,8 @@ class FakeConfig:
 
     def refresh(self):
         self.calls.append("config.refresh")
-        return False
+        changed, self.changed = self.changed, False
+        return changed
 
 
 class FakeRelay:
@@ -181,6 +183,36 @@ def test_unmapped_event_saves_a_sample_and_raw_rules_still_match(world, sql):
     assert sample["payload"]["source_id"] == "new-source" and sample["payload"]["sample"] == {"foo": "bar"}
     [alert] = sql("SELECT rule_id, sample_event FROM alerts")
     assert alert["rule_id"] == "raw-catch" and alert["sample_event"]["mapped"] is False
+
+
+def test_parked_events_replay_when_a_mapping_arrives(world, sql):
+    compiled, errors = compile_rules([
+        {"id": "raw-catch", "team_id": "ops", "route": {"recipients": [{"team": "ops"}]},
+         "when": {"all": [{"field": "raw.kind", "op": "eq", "value": "disk_full"}]}},
+        {"id": "disk-typed", "team_id": "ops", "route": {"recipients": [{"team": "ops"}]},
+         "when": {"all": [{"field": "type", "op": "eq", "value": "disk_full"}]}}])
+    assert errors == []
+    world.config.rules = [*world.config.rules, *compiled]
+    disk = [make_event("vendor-x", {"kind": "disk_full", "host": "h1"}, n) for n in range(5)]
+    other = [make_event("vendor-x", {"other": n}, n) for n in range(5, 7)]
+    world.consumer.queue = [Msg(e, i) for i, e in enumerate(disk + other)]
+    world.proc.step()
+    assert len(sql("SELECT seq FROM parked_events")) == 7
+    mapping = {"id": "vendor-x-disk", "status": "active", "origin": "llm", "priority": 100,
+               "match": {"all": [{"field": "raw.kind", "op": "exists"}]}, "fields": {"type": {"path": "kind"}}}
+    world.config.mappings, errors = compile_mappings([*SEED_MAPPINGS, mapping])
+    assert errors == []
+    world.config.changed, world.clock[0] = True, 2.0
+    world.proc.step()  # refreshes, then replays
+    world.clock[0] = 3.0
+    world.proc.step()  # flushes the replayed counts
+    assert [r["event"]["event_id"] for r in sql("SELECT event FROM parked_events ORDER BY seq")] == ["evt-5", "evt-6"]
+    alerts = {a["rule_id"]: a for a in sql("SELECT rule_id, count, sample_event, opened_partition FROM alerts")}
+    assert set(alerts) == {"raw-catch", "disk-typed"}
+    assert alerts["raw-catch"]["count"] == 5  # counted at arrival, not again on replay
+    typed = alerts["disk-typed"]
+    assert (typed["count"], typed["sample_event"]["mapped"], typed["opened_partition"]) == (5, True, -1)
+    assert [c["alert"]["rule_id"] for c in changes(sql, "opened")] == ["raw-catch", "disk-typed"]
 
 
 def test_store_failure_propagates_and_nothing_is_committed(world, monkeypatch):

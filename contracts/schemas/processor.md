@@ -30,7 +30,7 @@ The [Alert object](../api.md) plus six internal columns that never leave the ser
 | `acked_by`, `resolved_by` | text | User id, or `auto` |
 | `sample_event` | jsonb, not null | Envelope of the first event; a `raw` over 16,384 characters of JSON is replaced by a truncated preview |
 | `opened_by_event` | text, not null | Internal. `event_id` that last opened or reopened the alert, so a redelivered event is not counted twice |
-| `opened_partition`, `opened_offset` | int, bigint, not null | Internal. Kafka position of that event; every replica that caches the alert in Redis starts from it |
+| `opened_partition`, `opened_offset` | int, bigint, not null | Internal. Kafka position of that event; every replica that caches the alert in Redis starts from it. For a replayed parked event: `-1` and the event's `parked_events.seq` |
 
 - Unique index on `alert_key` where `status <> 'resolved'`: at most one live alert per key. This index,
   not Redis, decides whether an alert exists.
@@ -85,6 +85,25 @@ that removes them from `outbox`, so one bad record never blocks the records behi
 
 Insert with `ON CONFLICT DO NOTHING`; only a successful insert puts a `schema.samples` record into
 `outbox`, so a burst of a new schema causes one Claude call.
+
+### `parked_events`: unmapped events waiting for a mapping
+
+| Column | Type | Notes |
+|---|---|---|
+| `seq` | bigserial, primary key | Replay order |
+| `event_id` | text, not null, unique | A redelivered record parks once |
+| `fingerprint` | text, not null, indexed | As in `schema_samples` |
+| `event` | jsonb, not null | The raw event of [../events.md](../events.md) §2, payload whole |
+| `matched_rules` | text[], not null | Ids of the rules the unmapped event matched on arrival; the replay skips them, so no rule counts an event twice |
+| `created_at` | timestamptz, not null, default `now()` | |
+
+- Written in the same transaction as the `schema_samples` row, before the `events.raw` offset is committed:
+  every unmapped event, up to 1,000 per fingerprint (replicas parking the same schema at once can overshoot
+  by a batch each).
+- When a replica's compiled mappings or rules change (and once at its start), it pages the rows in `seq` order,
+  one replica at a time; a row that maps now goes through rules and dedup like a fresh event, keeping its
+  original `received_at`, and is deleted. A row that still does not map stays.
+- Rows older than 1 hour are deleted by the auto-resolve tick.
 
 ## Copies (fed by Kafka `config.changes`)
 

@@ -331,20 +331,61 @@ def test_unmapped_schemas_are_sampled_once(new_store, mappings, sql):
         return build_envelope(make_event("vendor-x", payload, n), mappings)
 
     store = new_store()
-    store.save_samples([env(n, {"kind": "disk_full", "host": f"h{n}"}) for n in range(50)])
-    store.save_samples([env(50, {"kind": "disk_full", "host": "h50"})])
-    new_store().save_samples([env(51, {"kind": "disk_full", "host": "h51"})])  # another replica: ON CONFLICT
+    store.save_samples([(env(n, {"kind": "disk_full", "host": f"h{n}"}), []) for n in range(50)])
+    store.save_samples([(env(50, {"kind": "disk_full", "host": "h50"}), [])])
+    new_store().save_samples([(env(51, {"kind": "disk_full", "host": "h51"}), [])])  # another replica: ON CONFLICT
     [row] = sql("SELECT * FROM schema_samples")
     [record] = sql("SELECT key, payload FROM outbox WHERE topic = 'schema.samples'")
     assert record == {"key": row["fingerprint"], "payload": {
         "fingerprint": row["fingerprint"], "source_id": "vendor-x", "sample": {"kind": "disk_full", "host": "h0"},
         "seen_at": "2026-11-20T10:15:02.123Z"}}
-    store.save_samples([env(52, {"kind": "cpu_hot", "host": "h1"})])
-    store.save_samples([build_envelope(make_event(*PAYLOADS["workflow"], 53), mappings)])  # mapped: skipped
+    store.save_samples([(env(52, {"kind": "cpu_hot", "host": "h1"}), [])])
+    store.save_samples([(build_envelope(make_event(*PAYLOADS["workflow"], 53), mappings), [])])  # mapped: skipped
     rows = sql("SELECT fingerprint, source_id FROM schema_samples ORDER BY fingerprint")
     records = sql("SELECT key FROM outbox WHERE topic = 'schema.samples' ORDER BY key")
     assert len(rows) == 2 and {r["source_id"] for r in rows} == {"vendor-x"}
     assert [r["key"] for r in records] == [r["fingerprint"] for r in rows]
+    assert sql("SELECT count(*) AS n FROM parked_events") == [{"n": 53}]  # every unmapped event, the mapped one not
+
+
+def test_unmapped_events_are_parked_once_capped_with_their_rules(new_store, mappings, sql, monkeypatch):
+    import processor.store as S
+    monkeypatch.setattr(S, "PARK_CAP", 3)
+
+    def env(n, kind):
+        return build_envelope(make_event("vendor-x", {"kind": kind, "n": n}, n), mappings)
+
+    store = new_store()
+    store.save_samples([(env(0, "disk_full"), ["r1", "r2"]), (env(1, "disk_full"), [])])
+    store.save_samples([(env(0, "disk_full"), ["r1", "r2"])])  # redelivered: parked once
+    store.save_samples([(env(n, "disk_full"), []) for n in range(2, 6)] + [(env(9, "cpu_hot"), [])])
+    rows = sql("SELECT event_id, event, matched_rules FROM parked_events ORDER BY seq")
+    assert [r["event_id"] for r in rows] == ["evt-0", "evt-1", "evt-2", "evt-9"]  # 3 per fingerprint
+    assert rows[0]["matched_rules"] == ["r1", "r2"] and rows[1]["matched_rules"] == []
+    assert rows[0]["event"] == {"event_id": "evt-0", "source_id": "vendor-x", "received_at": "2026-11-20T10:15:02.123Z",
+                                "payload": {"kind": "disk_full", "n": 0}}
+
+
+def test_parked_events_expire_with_the_resolve_tick(new_store, mappings, sql):
+    from processor.store import PARK_TTL_S
+    store = new_store()
+    store.save_samples([(build_envelope(make_event("vendor-x", {"kind": "x"}, 0), mappings), [])])
+    store.resolve_quiet(datetime.now(UTC) + timedelta(seconds=PARK_TTL_S - 60))
+    assert len(sql("SELECT seq FROM parked_events")) == 1
+    store.resolve_quiet(datetime.now(UTC) + timedelta(seconds=PARK_TTL_S + 1))
+    assert sql("SELECT seq FROM parked_events") == []
+
+
+def test_replayed_items_skip_the_watermark(new_store, batch, sql):
+    from processor.store import REPLAY
+    store = new_store()
+    store.process(batch("workflow", range(100, 110)))
+    # a lower seq after a higher one: seq order is not commit order across replicas
+    store.process([dataclasses.replace(it, partition=REPLAY, offset=6) for it in batch("workflow", [0])])
+    store.process([dataclasses.replace(it, partition=REPLAY, offset=5) for it in batch("workflow", [1])])
+    store.process(batch("workflow", [109]))  # the real partition's watermark is untouched: still deduped
+    store.flush()
+    assert sql("SELECT count FROM alerts") == [{"count": 12}]
 
 
 class Crash(Exception):

@@ -20,7 +20,7 @@ from .config import Config
 from .core import TS_MAX, TS_MIN, build_envelope, match_rules
 from .relay import MESSAGE_TIMEOUT_MS, Relay
 from .store import TOPIC as CHANGES_TOPIC
-from .store import DIRTY, Item, Store
+from .store import DIRTY, REPLAY, Item, Store
 
 log = logging.getLogger("processor")
 RAW_TOPIC, CONFIG_TOPIC = "events.raw", "config.changes"
@@ -128,6 +128,7 @@ class Processor:
         self.now, self.utcnow = now, utcnow
         self._flushed = self._resolved = self._refreshed = self._logged = now()
         self.events = self.matches = self._logged_events = 0
+        self._replay = False  # parked events wait for a replay: set when the compiled config changed
 
     def step(self, timeout: float = 0.1) -> None:
         # shortcut: Postgres, Redis and Kafka commit errors end the process, the container restarts it and Kafka redelivers
@@ -149,20 +150,21 @@ class Processor:
                 continue
             self.events += 1
             env = build_envelope(event, self.config.mappings)
-            if not env["mapped"]:
-                unmapped.append(env)
             its = [Item(env, m, rules[m.rule_id].window_s, rules[m.rule_id].runbook_id, msg.partition(), msg.offset())
                    for m in match_rules(env, compiled)]
             items += its
-            records.append((msg, env, its))
+            park = env, [it.match.rule_id for it in its]  # save_samples skips it when mapped
+            if not env["mapped"]:
+                unmapped.append(park)
+            records.append((msg, park, its))
         try:
             self.store.save_samples(unmapped)
             self.store.process(items)
         except DATA_ERRORS:
             log.exception("the store rejected a value in this batch; applying it one record at a time")
-            for msg, env, its in records:
+            for msg, park, its in records:
                 try:
-                    self.store.save_samples([env])
+                    self.store.save_samples([park])
                     self.store.process(its)
                 except DATA_ERRORS as e:
                     log.warning("skipped %s[%s]@%s: the store rejected it (%r)", msg.topic(), msg.partition(), msg.offset(), e)
@@ -191,12 +193,33 @@ class Processor:
             if offsets := {(m.topic(), m.partition()): m.offset() + 1 for m in msgs if not m.error()}:
                 _commit(self.config_consumer, offsets)  # after apply: a crash before this line means redelivery
         if t - self._refreshed >= REFRESH_S:
-            self.config.refresh()
+            if self.config.refresh():
+                self._replay = True
             self._refreshed = t
+        if self._replay:
+            self._replay = not self.store.replay_parked(self._replay_rows)  # lock held elsewhere: retry next step
         if t - self._logged >= LOG_S:
             log.info("events=%d matches=%d events_per_s=%.1f",
                      self.events, self.matches, (self.events - self._logged_events) / (t - self._logged))
             self._logged, self._logged_events = t, self.events
+
+    def _replay_rows(self, rows) -> list[int]:
+        """Parked rows that map now -> their rule matches (minus the rules counted at arrival) into the store; returns
+        the seqs of those rows. Rows that still do not map stay parked."""
+        compiled = self.config.rules
+        rules = {r.id: r.rule for r in compiled}
+        items, done = [], []
+        for seq, event, matched in rows:
+            if not (env := build_envelope(event, self.config.mappings))["mapped"]:
+                continue
+            done.append(seq)
+            items += [Item(env, m, rules[m.rule_id].window_s, rules[m.rule_id].runbook_id, REPLAY, seq)
+                      for m in match_rules(env, compiled) if m.rule_id not in matched]
+        try:
+            self.store.process(items)
+        except DATA_ERRORS:  # no record-by-record retry: replayed items skip the watermark, so a retry would count twice
+            log.exception("the store rejected a replayed parked event; dropping %d parked events", len(done))
+        return done
 
 
 def _logging() -> None:
@@ -289,6 +312,7 @@ def _run(brokers: str, db_url: str, redis_url: str) -> None:
     store = Store(psycopg.connect(db_url, autocommit=True), r)
     relay = Relay(psycopg.connect(db_url, autocommit=True), producer, r)
     proc = Processor(consumer, config_consumer, changes_consumer, Config(config_pg), store, relay)
+    proc._replay = True  # a crash may have parked events after the last replay
 
     stop = []
     for s in (signal.SIGTERM, signal.SIGINT):
