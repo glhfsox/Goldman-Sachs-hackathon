@@ -13,8 +13,10 @@ public static class ActivityRecords
         long count = 1,
         string firstSeen = "2026-11-20T10:15:01.000Z",
         string? ackedBy = null,
-        string sampleEvent = """{"type": "WORKFLOW_FAILED", "mapped": true}""")
+        string sampleEvent = """{"type": "WORKFLOW_FAILED", "mapped": true}""",
+        string? runbookId = "settlement-timeout")
     {
+        var runbook = runbookId is null ? "null" : $"\"{runbookId}\"";
         var acked = ackedBy is null ? "null" : $"\"{ackedBy}\"";
 
         return $$$"""
@@ -24,7 +26,7 @@ public static class ActivityRecords
                        "body": "Counterparty service did not respond in 5000 ms",
                        "fields": {"step": "settle", "error.code": "TIMEOUT"}, "color": "red", "count": {{{count}}},
                        "first_seen": "{{{firstSeen}}}", "last_seen": "2026-11-20T10:15:01.000Z",
-                       "first_received_at": "2026-11-20T10:15:02.123Z", "runbook_id": "settlement-timeout",
+                       "first_received_at": "2026-11-20T10:15:02.123Z", "runbook_id": {{{runbook}}},
                        "acked_by": {{{acked}}}, "resolved_by": null,
                        "sample_event": {{{sampleEvent}}} }}
             """;

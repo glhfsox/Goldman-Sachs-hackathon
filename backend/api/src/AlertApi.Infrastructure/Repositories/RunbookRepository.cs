@@ -27,6 +27,17 @@ public sealed class RunbookRepository : IRunbookRepository
         return await query.OrderBy(runbook => runbook.Id).ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Runbook>> GetActiveByTeamAsync(string teamId, CancellationToken cancellationToken = default)
+    {
+        var runbooks = await _context.Runbooks
+            .AsNoTracking()
+            .Where(runbook => runbook.TeamId == teamId && runbook.Status == Runbook.Active && runbook.Canonical != null)
+            .ToListAsync(cancellationToken);
+
+        // Ordered here, not by the database, so the order does not depend on its collation.
+        return runbooks.OrderBy(runbook => runbook.Id, StringComparer.Ordinal).ToList();
+    }
+
     public async Task<Runbook?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
     {
         return await _context.Runbooks.FirstOrDefaultAsync(runbook => runbook.Id == id, cancellationToken);
