@@ -39,16 +39,16 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 
 | Method and path | Body | Returns |
 |---|---|---|
-| `GET /alerts?team=&status=&limit=` | | `[Alert]`, newest first |
+| `GET /alerts?team=&status=&limit=` | | `[Alert]`, newest `first_seen` first; `limit` defaults to 50, at most 200 |
 | `GET /alerts/{id}` | | `{alert, incident, timeline: [alert_events], notifications: [...], runbook}` |
 | `POST /alerts/{id}/ack` | | `Alert` |
 | `POST /alerts/{id}/resolve` | | `Alert` |
 | `GET /rules?team=` | | `[Rule]` ([rules.md](rules.md)) |
 | `GET /rules/{id}` | | `Rule` |
 | `POST /rules`, `PUT /rules/{id}` | `Rule` | `Rule`, or `422 invalid_rule`. `409 conflict` for a taken id on `POST`; on `PUT` the body `id` must equal the URL id |
-| `GET /mappings`, `PUT /mappings/{id}[?fingerprint=<fingerprint>]` | `Mapping` | `Mapping`, or `422 invalid_mapping`. `PUT` creates or replaces; `GET` lists highest `priority` first. With `fingerprint`, that schema sample becomes `mapped` |
-| `GET /schema-samples?status=` | | unmapped schemas waiting for a mapping |
-| `PUT /schema-samples/{fingerprint}` | `{status: "failed", error}` | the sample; the ai-worker calls it when it could not produce a valid mapping, so a person writes one in the UI |
+| `GET /mappings`, `PUT /mappings/{id}[?fingerprint=<fingerprint>]` | `Mapping` | `Mapping`, or `422 invalid_mapping`. `PUT` creates or replaces; `GET` lists highest `priority` first. With `fingerprint`, that schema sample becomes `mapped` in the same save; an unknown fingerprint is `404` and nothing is saved |
+| `GET /schema-samples?status=` | | `[{fingerprint, source_id, sample, status, error, created_at}]`, oldest first; `status` is `pending`, `mapped` or `failed` |
+| `PUT /schema-samples/{fingerprint}` | `{status: "failed", error}` | the sample; the ai-worker calls it when it could not produce a valid mapping, so a person writes one in the UI. `422 invalid_schema_sample` for any other status, `404` for an unknown fingerprint, `409` when the sample is already `mapped` |
 | `GET /sources`, `GET /sources/{id}`, `POST /sources` | `{id, kind, config}` | `Source`. `id`: lowercase letters, digits, `-`; a `kafka` source needs `config.topic`; `422 invalid_source` otherwise, `409 conflict` for a taken id |
 | `PUT /sources/{id}` | `{kind, config, enabled}` | `Source` (also how a source is disabled) |
 | `GET /teams` | | `[{id, name, members: [{user_id, name, on_call}]}]`, for pickers; read-only (seeded) |
@@ -62,7 +62,7 @@ incident's `root_alert_id` is the earliest alert on the most upstream service.
 | `GET /proposals?status=open` | | `[Proposal]` |
 | `POST /proposals/{id}/accept`, `POST /proposals/{id}/reject` | | `Proposal` |
 
-`runbook` in `GET /alerts/{id}` is the canonical runbook ([runbooks.md](runbooks.md)) with every
+`incident` and `runbook` in `GET /alerts/{id}` are `null` until incidents and runbooks are built. `runbook`, once built, is the canonical runbook ([runbooks.md](runbooks.md)) with every
 `{{placeholder}}` already filled from the alert's `sample_event`, plus the latest `ActionRun` per step.
 
 Each item of `notifications` carries what the UI needs for "why you got this / why not":

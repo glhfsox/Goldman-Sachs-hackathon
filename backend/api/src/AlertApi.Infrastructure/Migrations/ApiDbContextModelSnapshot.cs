@@ -22,6 +22,139 @@ namespace AlertApi.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("AlertApi.Domain.Models.Alert", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AckedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("acked_by");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("body");
+
+                    b.Property<string>("Color")
+                        .HasColumnType("text")
+                        .HasColumnName("color");
+
+                    b.Property<long>("Count")
+                        .HasColumnType("bigint")
+                        .HasColumnName("count");
+
+                    b.Property<string>("Fields")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("fields");
+
+                    b.Property<DateTimeOffset>("FirstReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_received_at");
+
+                    b.Property<DateTimeOffset>("FirstSeen")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_seen");
+
+                    b.Property<string>("IncidentId")
+                        .HasColumnType("text")
+                        .HasColumnName("incident_id");
+
+                    b.Property<DateTimeOffset>("LastSeen")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen");
+
+                    b.Property<string>("ResolvedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("resolved_by");
+
+                    b.Property<string>("RuleId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("rule_id");
+
+                    b.Property<string>("RunbookId")
+                        .HasColumnType("text")
+                        .HasColumnName("runbook_id");
+
+                    b.Property<string>("SampleEvent")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("sample_event");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("severity");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TeamId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("team_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.HasKey("Id")
+                        .HasName("PK_alerts");
+
+                    b.HasIndex("FirstSeen")
+                        .HasDatabaseName("IX_alerts_first_seen");
+
+                    b.HasIndex("TeamId", "FirstSeen")
+                        .HasDatabaseName("IX_alerts_team_id_first_seen");
+
+                    b.ToTable("alerts", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.AlertEvent", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor");
+
+                    b.Property<string>("AlertId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("alert_id");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("at");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("data");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.HasKey("Id")
+                        .HasName("PK_alert_events");
+
+                    b.HasIndex("AlertId", "At")
+                        .HasDatabaseName("IX_alert_events_alert_id_at");
+
+                    b.ToTable("alert_events", (string)null);
+                });
+
             modelBuilder.Entity("AlertApi.Domain.Models.Mapping", b =>
                 {
                     b.Property<string>("Id")
@@ -82,6 +215,58 @@ namespace AlertApi.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("memberships", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.Notification", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AlertId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("alert_id");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("channel");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text")
+                        .HasColumnName("error");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTimeOffset>("SendAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("send_at");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("PK_notifications");
+
+                    b.HasIndex("AlertId")
+                        .HasDatabaseName("IX_notifications_alert_id");
+
+                    b.ToTable("notifications", (string)null);
                 });
 
             modelBuilder.Entity("AlertApi.Domain.Models.OutboxMessage", b =>
@@ -149,6 +334,44 @@ namespace AlertApi.Infrastructure.Migrations
                         .HasDatabaseName("IX_rules_team_id");
 
                     b.ToTable("rules", (string)null);
+                });
+
+            modelBuilder.Entity("AlertApi.Domain.Models.SchemaSample", b =>
+                {
+                    b.Property<string>("Fingerprint")
+                        .HasColumnType("text")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text")
+                        .HasColumnName("error");
+
+                    b.Property<string>("Sample")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("sample");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("Fingerprint")
+                        .HasName("PK_schema_samples");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_schema_samples_status");
+
+                    b.ToTable("schema_samples", (string)null);
                 });
 
             modelBuilder.Entity("AlertApi.Domain.Models.ServiceDependency", b =>
